@@ -62,6 +62,8 @@ const SearchableSelect = ({
   const pos = useMenuPosition(open, containerRef);
 
   const selected = options.find((o) => String(o.value) === String(value));
+  const isDefaultOrAll = !value || value === 'all';
+  const displayLabel = selected ? selected.label : (isDefaultOrAll && emptyLabel ? emptyLabel : placeholder);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -215,7 +217,7 @@ const SearchableSelect = ({
           border: `1px solid ${open ? s.colors.main : s.colors.darkLight}`,
           borderRadius: 9,
           padding: '10px 12px',
-          color: selected ? s.colors.light : s.colors.gray,
+          color: (selected || (isDefaultOrAll && emptyLabel)) ? s.colors.light : s.colors.gray,
           fontSize: 14,
           cursor: disabled ? 'not-allowed' : 'pointer',
           textAlign: 'left',
@@ -223,7 +225,7 @@ const SearchableSelect = ({
         }}
       >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {selected ? selected.label : placeholder}
+          {displayLabel}
         </span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill={s.colors.gray}>
           <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />

@@ -1,4 +1,4 @@
-﻿import csv
+import csv
 import io
 from datetime import datetime
 
@@ -20,7 +20,6 @@ from base.models import Room, Topic, Message
 def _build_csv_response(filename, headers, rows):
     """Generates a CSV HttpResponse with UTF-8 BOM for universal Excel compatibility."""
     buffer = io.StringIO()
-    # Write UTF-8 BOM so Excel opens non-ASCII characters cleanly
     buffer.write('\ufeff')
     writer = csv.writer(buffer)
     writer.writerow(headers)
@@ -38,7 +37,6 @@ def _build_excel_response(filename, headers, rows, sheet_title='Report', file_ex
     ws = wb.active
     ws.title = sheet_title[:31]
 
-    # Header styling
     header_fill = PatternFill(start_color='2C3E50', end_color='2C3E50', fill_type='solid')
     header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
     header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -53,7 +51,6 @@ def _build_excel_response(filename, headers, rows, sheet_title='Report', file_ex
     data_font = Font(name='Calibri', size=10)
     data_alignment = Alignment(vertical='center')
 
-    # Append headers
     ws.append(headers)
     for col_idx in range(1, len(headers) + 1):
         cell = ws.cell(row=1, column=col_idx)
@@ -64,7 +61,6 @@ def _build_excel_response(filename, headers, rows, sheet_title='Report', file_ex
 
     ws.row_dimensions[1].height = 28
 
-    # Append rows
     for row_idx, row_data in enumerate(rows, start=2):
         ws.append(row_data)
         ws.row_dimensions[row_idx].height = 20
@@ -79,7 +75,6 @@ def _build_excel_response(filename, headers, rows, sheet_title='Report', file_ex
             if stripe_fill:
                 cell.fill = stripe_fill
 
-    # Auto-adjust column widths
     for col_idx, col in enumerate(ws.columns, start=1):
         max_len = 0
         col_letter = get_column_letter(col_idx)
@@ -137,8 +132,8 @@ def admin_report_filter_options(request):
 @permission_classes([IsAdminUser])
 def admin_user_report(request):
     """
-    Generates User Report filtered by role, username, or search.
-    Supports preview JSON and direct downloads for csv, xls, xlsx via ?export=...
+    Generates User Report filtered by role, user_id, or search.
+    If export requested and no data found, returns 404 No data found.
     """
     role = request.GET.get('role', 'all')
     user_id = request.GET.get('user_id')
@@ -175,15 +170,11 @@ def admin_user_report(request):
 
     user_list = list(qs)
 
-    summary = {
-        'total_users': len(user_list),
-        'total_rooms_hosted': sum(u.rooms_hosted_count for u in user_list),
-        'total_messages_sent': sum(u.messages_sent_count for u in user_list),
-        'total_rooms_joined': sum(u.rooms_joined_count for u in user_list),
-    }
-
     # Handle Export Formats
     if export_format in ['csv', 'xls', 'xlsx']:
+        if not user_list:
+            return Response({'detail': 'No data found matching the selected filters.'}, status=404)
+
         timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"user_report_{timestamp_str}"
         headers = [
@@ -222,7 +213,13 @@ def admin_user_report(request):
         else:
             return _build_excel_response(filename, headers, rows, sheet_title='User Report', file_ext=export_format)
 
-    # JSON Preview
+    summary = {
+        'total_users': len(user_list),
+        'total_rooms_hosted': sum(u.rooms_hosted_count for u in user_list),
+        'total_messages_sent': sum(u.messages_sent_count for u in user_list),
+        'total_rooms_joined': sum(u.rooms_joined_count for u in user_list),
+    }
+
     results = []
     for u in user_list:
         role_label = 'Superuser' if u.is_superuser else ('Staff' if u.is_staff else 'Member')
@@ -237,7 +234,6 @@ def admin_user_report(request):
             'rooms_hosted': u.rooms_hosted_count,
             'rooms_joined': u.rooms_joined_count,
             'messages_sent': u.messages_sent_count,
-            'avatar': u.profile.avatar.url if hasattr(u, 'profile') and u.profile.avatar else None,
         })
 
     return Response({
@@ -250,8 +246,9 @@ def admin_user_report(request):
 @permission_classes([IsAdminUser])
 def admin_room_report(request):
     """
-    Generates Room Report filtered by topic, creator, participant, and date range.
-    Supports preview JSON and direct downloads for csv, xls, xlsx via ?export=...
+    Generates Room Report.
+    Date range (start_date and end_date) is strictly mandatory.
+    If export requested and no data found, returns 404 No data found.
     """
     topic_id = request.GET.get('topic_id')
     creator_id = request.GET.get('creator_id')
@@ -261,6 +258,18 @@ def admin_room_report(request):
     search = request.GET.get('search', '').strip()
     export_format = (request.GET.get('export') or request.GET.get('file_format') or '').lower()
 
+    # Mandatory Date Range Validation
+    if not start_date or not end_date:
+        return Response({'detail': 'Both start_date and end_date are required.'}, status=400)
+
+    parsed_start = parse_date(start_date)
+    parsed_end = parse_date(end_date)
+    if not parsed_start or not parsed_end:
+        return Response({'detail': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+
+    if parsed_start > parsed_end:
+        return Response({'detail': 'From Date cannot be later than To Date.'}, status=400)
+
     qs = (
         Room.objects.all()
         .select_related('host', 'topic')
@@ -268,6 +277,10 @@ def admin_room_report(request):
         .annotate(
             participant_count=Count('participants', distinct=True),
             message_count=Count('message', distinct=True),
+        )
+        .filter(
+            created__date__gte=parsed_start,
+            created__date__lte=parsed_end
         )
         .order_by('-created')
     )
@@ -281,29 +294,16 @@ def admin_room_report(request):
     if participant_id and participant_id != 'all':
         qs = qs.filter(participants__id=participant_id)
 
-    if start_date:
-        parsed_start = parse_date(start_date)
-        if parsed_start:
-            qs = qs.filter(created__date__gte=parsed_start)
-
-    if end_date:
-        parsed_end = parse_date(end_date)
-        if parsed_end:
-            qs = qs.filter(created__date__lte=parsed_end)
-
     if search:
         qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
 
     room_list = list(qs)
 
-    summary = {
-        'total_rooms': len(room_list),
-        'total_messages': sum(r.message_count for r in room_list),
-        'total_participants': sum(r.participant_count for r in room_list),
-    }
-
     # Handle Export Formats
     if export_format in ['csv', 'xls', 'xlsx']:
+        if not room_list:
+            return Response({'detail': 'No data found matching the selected filters.'}, status=404)
+
         timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"room_report_{timestamp_str}"
         headers = [
@@ -341,7 +341,12 @@ def admin_room_report(request):
         else:
             return _build_excel_response(filename, headers, rows, sheet_title='Room Report', file_ext=export_format)
 
-    # JSON Preview
+    summary = {
+        'total_rooms': len(room_list),
+        'total_messages': sum(r.message_count for r in room_list),
+        'total_participants': sum(r.participant_count for r in room_list),
+    }
+
     results = []
     for r in room_list:
         results.append({
@@ -353,7 +358,6 @@ def admin_room_report(request):
             'updated': r.updated.strftime('%Y-%m-%d %H:%M') if r.updated else '',
             'participants_count': r.participant_count,
             'messages_count': r.message_count,
-            'participants': [p.username for p in r.participants.all()[:10]],
         })
 
     return Response({

@@ -1,9 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as s from './adminStyles';
 import {
   getReportFilterOptions,
-  getUserReport,
-  getRoomReport,
   downloadReport,
 } from '../../api/admin';
 import { useToast } from '../../context/ToastContext';
@@ -14,17 +12,52 @@ const reportTypes = [
   { value: 'room', label: 'Room Report' },
 ];
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 500];
+// Standard SVG Icons (replacing emojis)
+const DocumentIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="16" y1="13" x2="8" y2="13" />
+    <line x1="16" y1="17" x2="8" y2="17" />
+    <polyline points="10 9 9 9 8 9" />
+  </svg>
+);
+
+const SpreadsheetIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+    <line x1="3" y1="9" x2="21" y2="9" />
+    <line x1="3" y1="15" x2="21" y2="15" />
+    <line x1="9" y1="3" x2="9" y2="21" />
+    <line x1="15" y1="3" x2="15" y2="21" />
+  </svg>
+);
+
+const ResetIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="1 4 1 10 7 10" />
+    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+  </svg>
+);
+
+const UserIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </svg>
+);
+
+const RoomIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+);
 
 const AdminReports = () => {
   const { showToast } = useToast();
 
   // Active Report Tab: 'user' | 'room'
   const [reportType, setReportType] = useState('user');
-
-  // Pagination State
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
 
   // Metadata for filter dropdowns
   const [filterOptions, setFilterOptions] = useState({
@@ -51,13 +84,10 @@ const AdminReports = () => {
     search: '',
   });
 
-  // Preview Data State
-  const [reportData, setReportData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  // Loading state during file download
   const [downloadingFormat, setDownloadingFormat] = useState(null);
-  const [hasViewed, setHasViewed] = useState(false);
 
-  // Load dropdown options once on mount
+  // Load dropdown options on mount
   useEffect(() => {
     const fetchOptions = async () => {
       try {
@@ -71,28 +101,6 @@ const AdminReports = () => {
     };
     fetchOptions();
   }, [showToast]);
-
-  // Handle Fetch / "View" button click
-  const handleViewReport = useCallback(async () => {
-    setLoading(true);
-    setReportData(null);
-    setHasViewed(true);
-    setPage(1);
-
-    try {
-      if (reportType === 'user') {
-        const data = await getUserReport(userFilters);
-        setReportData(data);
-      } else {
-        const data = await getRoomReport(roomFilters);
-        setReportData(data);
-      }
-    } catch (err) {
-      showToast(err.message || 'Failed to generate report', 'error');
-    } finally {
-      setLoading(false);
-    }
-  }, [reportType, userFilters, roomFilters, showToast]);
 
   // Reset current report filters
   const handleReset = () => {
@@ -112,22 +120,27 @@ const AdminReports = () => {
         search: '',
       });
     }
-    setReportData(null);
-    setHasViewed(false);
-    setPage(1);
   };
 
   // Switch report type
   const handleReportTypeChange = (e) => {
-    const newType = e.target.value;
-    setReportType(newType);
-    setReportData(null);
-    setHasViewed(false);
-    setPage(1);
+    setReportType(e.target.value);
   };
 
-  // Handle direct file download
+  // Direct file download handler with mandatory validation & 404 detection
   const handleDownload = async (format) => {
+    // Validate mandatory date range on Room Report
+    if (reportType === 'room') {
+      if (!roomFilters.start_date || !roomFilters.end_date) {
+        showToast('Please select both From Date and To Date.', 'error');
+        return;
+      }
+      if (roomFilters.start_date > roomFilters.end_date) {
+        showToast('From Date cannot be later than To Date.', 'error');
+        return;
+      }
+    }
+
     setDownloadingFormat(format);
     try {
       const activeFilters = reportType === 'user' ? userFilters : roomFilters;
@@ -137,15 +150,16 @@ const AdminReports = () => {
         filters: activeFilters,
       });
       const typeLabel = reportType === 'user' ? 'User' : 'Room';
-      showToast(typeLabel + ' report downloaded as .' + format, 'success');
+      showToast(`${typeLabel} report successfully downloaded as .${format}`, 'success');
     } catch (err) {
-      showToast(err.message || ('Failed to download .' + format + ' report'), 'error');
+      // Handles 404 "No data found matching the selected filters."
+      showToast(err.message || 'No data found matching the selected filters.', 'error');
     } finally {
       setDownloadingFormat(null);
     }
   };
 
-  // Shared form input styles
+  // Styling
   const inputStyle = {
     ...s.searchInput,
     width: '100%',
@@ -170,26 +184,10 @@ const AdminReports = () => {
 
   const formGrid = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '16px',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: '18px',
     alignItems: 'flex-end',
   };
-
-  const statCardStyle = {
-    background: s.colors.dark,
-    border: `1px solid ${s.colors.darkLight}`,
-    borderRadius: '10px',
-    padding: '14px 18px',
-    flex: '1 1 180px',
-  };
-
-  // Pagination Calculations
-  const allResults = reportData?.results || [];
-  const totalCount = allResults.length;
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const startIndex = (currentPage - 1) * pageSize;
-  const paginatedResults = allResults.slice(startIndex, startIndex + pageSize);
 
   return (
     <div style={{ paddingBottom: '40px' }}>
@@ -198,7 +196,7 @@ const AdminReports = () => {
         <div>
           <h1 style={s.title}>Reports</h1>
           <p style={{ color: s.colors.gray, fontSize: '13px', margin: '4px 0 0 0' }}>
-            Filter, inspect on-screen, and export custom User and Room activity reports
+            Configure filters and export custom User and Room activity reports
           </p>
         </div>
 
@@ -228,12 +226,17 @@ const AdminReports = () => {
         </div>
       </div>
 
-      {/* Filter Form Card */}
-      <div style={{ ...s.card, padding: '22px', marginBottom: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-          <h3 style={{ margin: 0, fontSize: '16px', color: '#fff', fontWeight: '600' }}>
-            {reportType === 'user' ? '👤 User Report Filters' : '💬 Room Report Filters'}
-          </h3>
+      {/* Filter & Export Card */}
+      <div style={{ ...s.card, padding: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ color: s.colors.main, display: 'flex' }}>
+              {reportType === 'user' ? <UserIcon /> : <RoomIcon />}
+            </span>
+            <h3 style={{ margin: 0, fontSize: '16px', color: '#fff', fontWeight: '600' }}>
+              {reportType === 'user' ? 'User Report Filters' : 'Room Report Filters'}
+            </h3>
+          </div>
           {optionsLoading && (
             <span style={{ fontSize: '12px', color: s.colors.gray }}>Loading filter options...</span>
           )}
@@ -330,31 +333,43 @@ const AdminReports = () => {
                   value={roomFilters.participant_id === 'all' ? null : roomFilters.participant_id}
                   onChange={(val) => setRoomFilters({ ...roomFilters, participant_id: val || 'all' })}
                   placeholder="Search participant..."
-                  emptyLabel="Any Participant"
+                  emptyLabel="All Participants"
                   allowClear={true}
                   style={{ width: '100%' }}
                 />
               </div>
             </div>
 
-            <div style={{ ...formGrid, marginTop: '16px' }}>
+            <div style={{ ...formGrid, marginTop: '18px' }}>
               <div>
-                <label style={labelStyle}>From Date</label>
+                <label style={labelStyle}>
+                  From Date <span style={{ color: s.colors.error }}>*</span>
+                </label>
                 <input
                   type="date"
+                  required
                   value={roomFilters.start_date}
                   onChange={(e) => setRoomFilters({ ...roomFilters, start_date: e.target.value })}
-                  style={inputStyle}
+                  style={{
+                    ...inputStyle,
+                    borderColor: !roomFilters.start_date ? s.colors.darkLight : s.colors.main,
+                  }}
                 />
               </div>
 
               <div>
-                <label style={labelStyle}>To Date</label>
+                <label style={labelStyle}>
+                  To Date <span style={{ color: s.colors.error }}>*</span>
+                </label>
                 <input
                   type="date"
+                  required
                   value={roomFilters.end_date}
                   onChange={(e) => setRoomFilters({ ...roomFilters, end_date: e.target.value })}
-                  style={inputStyle}
+                  style={{
+                    ...inputStyle,
+                    borderColor: !roomFilters.end_date ? s.colors.darkLight : s.colors.main,
+                  }}
                 />
               </div>
 
@@ -369,418 +384,116 @@ const AdminReports = () => {
                 />
               </div>
             </div>
+
+            <div style={{ marginTop: '8px', fontSize: '12px', color: s.colors.gray }}>
+              <span style={{ color: s.colors.error }}>*</span> Date range is required for generating room reports.
+            </div>
           </div>
         )}
 
-        {/* Action Buttons */}
+        {/* Download Actions Section */}
         <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            marginTop: '20px',
-            paddingTop: '16px',
+            marginTop: '28px',
+            paddingTop: '20px',
             borderTop: `1px solid ${s.colors.darkLight}`,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px',
           }}
         >
-          <button
-            onClick={handleViewReport}
-            disabled={loading}
-            style={{
-              ...s.btn('primary'),
-              padding: '10px 22px',
-              fontSize: '14px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            {loading ? (
-              'Generating...'
-            ) : (
-              <>
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                  <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
-                </svg>
-                View Report
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={handleReset}
-            disabled={loading}
-            style={{
-              ...s.btn('default'),
-              padding: '10px 18px',
-              fontSize: '14px',
-            }}
-          >
-            ↺ Reset
-          </button>
-        </div>
-      </div>
-
-      {/* Results Section */}
-      {loading ? (
-        <div style={{ ...s.card, padding: '48px', textAlign: 'center', color: s.colors.gray }}>
-          <div style={{ fontSize: '15px', marginBottom: '8px' }}>Generating report data...</div>
-          <div style={{ fontSize: '13px' }}>Please wait while matching records are computed.</div>
-        </div>
-      ) : reportData ? (
-        <div>
-          {/* Summary KPI Badges */}
-          <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', marginBottom: '20px' }}>
-            {reportType === 'user' ? (
-              <>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '12px', color: s.colors.gray, textTransform: 'uppercase' }}>
-                    Matching Users
-                  </div>
-                  <div style={{ fontSize: '24px', fontWeight: '700', color: s.colors.main, marginTop: '4px' }}>
-                    {reportData.summary.total_users}
-                  </div>
-                </div>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '12px', color: s.colors.gray, textTransform: 'uppercase' }}>
-                    Rooms Hosted
-                  </div>
-                  <div style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginTop: '4px' }}>
-                    {reportData.summary.total_rooms_hosted}
-                  </div>
-                </div>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '12px', color: s.colors.gray, textTransform: 'uppercase' }}>
-                    Messages Sent
-                  </div>
-                  <div style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginTop: '4px' }}>
-                    {reportData.summary.total_messages_sent}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '12px', color: s.colors.gray, textTransform: 'uppercase' }}>
-                    Matching Rooms
-                  </div>
-                  <div style={{ fontSize: '24px', fontWeight: '700', color: s.colors.main, marginTop: '4px' }}>
-                    {reportData.summary.total_rooms}
-                  </div>
-                </div>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '12px', color: s.colors.gray, textTransform: 'uppercase' }}>
-                    Total Participants
-                  </div>
-                  <div style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginTop: '4px' }}>
-                    {reportData.summary.total_participants}
-                  </div>
-                </div>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '12px', color: s.colors.gray, textTransform: 'uppercase' }}>
-                    Total Messages
-                  </div>
-                  <div style={{ fontSize: '24px', fontWeight: '700', color: '#fff', marginTop: '4px' }}>
-                    {reportData.summary.total_messages}
-                  </div>
-                </div>
-              </>
-            )}
+          <div>
+            <div style={{ fontSize: '14px', fontWeight: '700', color: '#fff' }}>
+              Download Report
+            </div>
+            <div style={{ fontSize: '12px', color: s.colors.lightGray, marginTop: '2px' }}>
+              Exports all matching records. If no data matches, you will be notified.
+            </div>
           </div>
 
-          {/* Preview Table Card */}
-          <div style={{ ...s.card, marginBottom: '22px' }}>
-            <div
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* CSV Button */}
+            <button
+              onClick={() => handleDownload('csv')}
+              disabled={downloadingFormat !== null}
               style={{
-                padding: '14px 18px',
-                borderBottom: `1px solid ${s.colors.dark}`,
-                display: 'flex',
-                justifyContent: 'space-between',
+                ...s.btn('default'),
+                background: '#242536',
+                color: '#fff',
+                border: `1px solid ${s.colors.darkLight}`,
+                display: 'inline-flex',
                 alignItems: 'center',
+                gap: '8px',
+                padding: '9px 18px',
+                opacity: downloadingFormat ? 0.7 : 1,
               }}
             >
-              <span style={{ fontSize: '14px', fontWeight: '600', color: '#fff' }}>
-                On-Screen Preview ({totalCount > 0 ? `Showing ${startIndex + 1}–${Math.min(startIndex + pageSize, totalCount)} of ${totalCount} records` : '0 records'})
-              </span>
-            </div>
+              <DocumentIcon />
+              {downloadingFormat === 'csv' ? 'Downloading...' : 'Download CSV'}
+            </button>
 
-            <div style={s.tableWrap}>
-              {reportType === 'user' ? (
-                /* USER REPORT TABLE */
-                <table style={s.table}>
-                  <thead>
-                    <tr>
-                      <th style={s.th}>ID</th>
-                      <th style={s.th}>Username</th>
-                      <th style={s.th}>Email</th>
-                      <th style={s.th}>Role</th>
-                      <th style={s.th}>Status</th>
-                      <th style={s.th}>Joined</th>
-                      <th style={s.th}>Last Login</th>
-                      <th style={{ ...s.th, textAlign: 'right' }}>Rooms Hosted</th>
-                      <th style={{ ...s.th, textAlign: 'right' }}>Rooms Joined</th>
-                      <th style={{ ...s.th, textAlign: 'right' }}>Messages Sent</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedResults.length > 0 ? (
-                      paginatedResults.map((u) => (
-                        <tr key={u.id}>
-                          <td style={{ ...s.td, color: s.colors.gray }}>#{u.id}</td>
-                          <td style={{ ...s.td, fontWeight: '600' }}>{u.username}</td>
-                          <td style={{ ...s.td, color: s.colors.lightGray }}>{u.email}</td>
-                          <td style={s.td}>
-                            <span
-                              style={s.badge(
-                                u.role === 'Superuser' ? 'superuser' : u.role === 'Staff' ? 'staff' : 'default'
-                              )}
-                            >
-                              {u.role}
-                            </span>
-                          </td>
-                          <td style={s.td}>
-                            <span
-                              style={{
-                                color: u.is_active ? s.colors.success : s.colors.error,
-                                fontSize: '12px',
-                                fontWeight: '600',
-                              }}
-                            >
-                              {u.is_active ? '● Active' : '● Inactive'}
-                            </span>
-                          </td>
-                          <td style={{ ...s.td, fontSize: '12px', color: s.colors.lightGray }}>
-                            {u.date_joined || '—'}
-                          </td>
-                          <td style={{ ...s.td, fontSize: '12px', color: s.colors.lightGray }}>
-                            {u.last_login || 'Never'}
-                          </td>
-                          <td style={{ ...s.td, textAlign: 'right', fontWeight: '600' }}>{u.rooms_hosted}</td>
-                          <td style={{ ...s.td, textAlign: 'right', color: s.colors.lightGray }}>
-                            {u.rooms_joined}
-                          </td>
-                          <td style={{ ...s.td, textAlign: 'right', fontWeight: '600', color: s.colors.main }}>
-                            {u.messages_sent}
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="10" style={s.emptyState}>
-                          No users found matching the selected filters.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              ) : (
-                /* ROOM REPORT TABLE */
-                <table style={s.table}>
-                  <thead>
-                    <tr>
-                      <th style={s.th}>ID</th>
-                      <th style={s.th}>Room Name</th>
-                      <th style={s.th}>Topic</th>
-                      <th style={s.th}>Host / Creator</th>
-                      <th style={s.th}>Created Date</th>
-                      <th style={s.th}>Last Updated</th>
-                      <th style={{ ...s.th, textAlign: 'right' }}>Participants</th>
-                      <th style={{ ...s.th, textAlign: 'right' }}>Messages</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedResults.length > 0 ? (
-                      paginatedResults.map((r) => (
-                        <tr key={r.id}>
-                          <td style={{ ...s.td, color: s.colors.gray }}>#{r.id}</td>
-                          <td style={{ ...s.td, fontWeight: '600' }}>{r.name}</td>
-                          <td style={s.td}>
-                            <span style={s.badge('default')}>{r.topic}</span>
-                          </td>
-                          <td style={{ ...s.td, color: s.colors.main }}>@{r.host_username}</td>
-                          <td style={{ ...s.td, fontSize: '12px', color: s.colors.lightGray }}>{r.created}</td>
-                          <td style={{ ...s.td, fontSize: '12px', color: s.colors.lightGray }}>{r.updated}</td>
-                          <td style={{ ...s.td, textAlign: 'right', fontWeight: '600' }}>
-                            {r.participants_count}
-                          </td>
-                          <td style={{ ...s.td, textAlign: 'right', fontWeight: '600', color: s.colors.main }}>
-                            {r.messages_count}
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan="8" style={s.emptyState}>
-                          No rooms found matching the selected filters.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              )}
-            </div>
+            {/* XLS Button */}
+            <button
+              onClick={() => handleDownload('xls')}
+              disabled={downloadingFormat !== null}
+              style={{
+                ...s.btn('default'),
+                background: '#1e4b3c',
+                color: '#85e3b3',
+                border: '1px solid #28634f',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '9px 18px',
+                opacity: downloadingFormat ? 0.7 : 1,
+              }}
+            >
+              <SpreadsheetIcon />
+              {downloadingFormat === 'xls' ? 'Downloading...' : 'Download XLS'}
+            </button>
 
-            {/* Pagination Controls */}
-            {totalCount > 0 && (
-              <div
-                style={{
-                  ...s.pagination,
-                  padding: '14px 18px',
-                  margin: 0,
-                  borderTop: `1px solid ${s.colors.dark}`,
-                  background: 'rgba(0,0,0,0.1)',
-                }}
-              >
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    color: s.colors.lightGray,
-                    fontSize: 13,
-                  }}
-                >
-                  Rows
-                  <select
-                    value={pageSize}
-                    onChange={(e) => {
-                      setPageSize(Number(e.target.value));
-                      setPage(1);
-                    }}
-                    style={{ ...s.selectInput, minWidth: 76, padding: '6px 26px 6px 10px' }}
-                  >
-                    {PAGE_SIZE_OPTIONS.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  style={s.btn('default')}
-                  disabled={currentPage <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  Previous
-                </button>
-                <span style={{ fontSize: 13 }}>
-                  Page {currentPage} of {totalPages} · {totalCount} total
-                </span>
-                <button
-                  style={s.btn('default')}
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                >
-                  Next
-                </button>
-              </div>
-            )}
-          </div>
+            {/* XLSX Button */}
+            <button
+              onClick={() => handleDownload('xlsx')}
+              disabled={downloadingFormat !== null}
+              style={{
+                ...s.btn('success'),
+                background: '#107c41',
+                color: '#ffffff',
+                border: '1px solid #16934e',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '9px 18px',
+                boxShadow: '0 2px 8px rgba(16, 124, 65, 0.3)',
+                opacity: downloadingFormat ? 0.7 : 1,
+              }}
+            >
+              <SpreadsheetIcon />
+              {downloadingFormat === 'xlsx' ? 'Downloading...' : 'Download XLSX'}
+            </button>
 
-          {/* Export Options Bar Below Table */}
-          <div
-            style={{
-              ...s.card,
-              padding: '18px 22px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '14px',
-              background: 'linear-gradient(180deg, #34354a 0%, #2a2b3d 100%)',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: '700', color: '#fff' }}>
-                📥 Download Filtered Report
-              </div>
-              <div style={{ fontSize: '12px', color: s.colors.lightGray, marginTop: '2px' }}>
-                Exports the exact filtered records ({reportData.results.length} items) in your selected format
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              {/* CSV Button */}
-              <button
-                onClick={() => handleDownload('csv')}
-                disabled={downloadingFormat !== null}
-                style={{
-                  ...s.btn('default'),
-                  background: '#242536',
-                  color: '#fff',
-                  border: `1px solid ${s.colors.darkLight}`,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '7px',
-                  padding: '9px 16px',
-                }}
-              >
-                <span>📄</span>
-                {downloadingFormat === 'csv' ? 'Downloading...' : 'Download CSV'}
-              </button>
-
-              {/* XLS Button */}
-              <button
-                onClick={() => handleDownload('xls')}
-                disabled={downloadingFormat !== null}
-                style={{
-                  ...s.btn('default'),
-                  background: '#1e4b3c',
-                  color: '#85e3b3',
-                  border: '1px solid #28634f',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '7px',
-                  padding: '9px 16px',
-                }}
-              >
-                <span>📊</span>
-                {downloadingFormat === 'xls' ? 'Downloading...' : 'Download XLS'}
-              </button>
-
-              {/* XLSX Button */}
-              <button
-                onClick={() => handleDownload('xlsx')}
-                disabled={downloadingFormat !== null}
-                style={{
-                  ...s.btn('success'),
-                  background: '#107c41',
-                  color: '#ffffff',
-                  border: '1px solid #16934e',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '7px',
-                  padding: '9px 16px',
-                  boxShadow: '0 2px 8px rgba(16, 124, 65, 0.3)',
-                }}
-              >
-                <span>📗</span>
-                {downloadingFormat === 'xlsx' ? 'Downloading...' : 'Download XLSX'}
-              </button>
-            </div>
+            {/* Reset Button */}
+            <button
+              onClick={handleReset}
+              disabled={downloadingFormat !== null}
+              style={{
+                ...s.btn('default'),
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '9px 14px',
+              }}
+              title="Reset all filters"
+            >
+              <ResetIcon />
+              Reset
+            </button>
           </div>
         </div>
-      ) : hasViewed ? null : (
-        /* Initial prompt to fill form and click view */
-        <div
-          style={{
-            ...s.card,
-            padding: '48px 24px',
-            textAlign: 'center',
-            color: s.colors.gray,
-            borderStyle: 'dashed',
-          }}
-        >
-          <div style={{ fontSize: '28px', marginBottom: '12px' }}>📊</div>
-          <div style={{ fontSize: '15px', color: s.colors.light, fontWeight: '600', marginBottom: '6px' }}>
-            Ready to Generate Report
-          </div>
-          <div style={{ fontSize: '13px', maxWidth: '420px', margin: '0 auto' }}>
-            Select your desired filters in the form above and click the <strong>View Report</strong> button
-            to preview the results and unlock downloads.
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 };

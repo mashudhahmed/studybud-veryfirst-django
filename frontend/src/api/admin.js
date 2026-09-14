@@ -223,6 +223,19 @@ export const downloadReport = async ({ type, format = 'csv', filters = {} }) => 
     link.remove();
     window.URL.revokeObjectURL(downloadUrl);
   } catch (error) {
-    throw new Error(extractErrorMessage(error, `Failed to download ${format.toUpperCase()} report`));
+    if (error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text();
+        const json = JSON.parse(text);
+        if (json.detail) {
+          throw new Error(json.detail);
+        }
+      } catch (parseErr) {
+        if (parseErr.message && !parseErr.message.includes('JSON')) {
+          throw parseErr;
+        }
+      }
+    }
+    throw new Error(extractErrorMessage(error, 'No data found matching the selected filters.'));
   }
 };
