@@ -88,47 +88,48 @@ def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_
     title_cell.alignment = Alignment(horizontal='center', vertical='center')
     ws.row_dimensions[title_row].height = 28
 
-    # 3. Metadata Details Block (Centered header across all columns)
-    meta_box_start = title_row + 2
+    # 3. Integrated Full-Width Executive Card Container
+    card_border_color = 'CBD5E1'
+    card_header_fill = PatternFill(start_color='F1F5F9', end_color='F1F5F9', fill_type='solid')
+    card_body_fill = PatternFill(start_color='F8FAFC', end_color='F8FAFC', fill_type='solid')
+
+    meta_card_start_row = title_row + 2
     ws.row_dimensions[title_row + 1].height = 10
-    ws.cell(row=meta_box_start, column=1, value="REPORT DETAILS & FILTER CRITERIA")
-    ws.merge_cells(start_row=meta_box_start, start_column=1, end_row=meta_box_start, end_column=num_cols)
-    meta_title_cell = ws.cell(row=meta_box_start, column=1)
-    meta_title_cell.font = Font(name='Calibri', size=10, bold=True, color='64748B')
+    ws.row_dimensions[meta_card_start_row].height = 24
+
+    # Top Header Bar of the Card
+    ws.cell(row=meta_card_start_row, column=1, value="REPORT DETAILS & FILTER CRITERIA")
+    ws.merge_cells(start_row=meta_card_start_row, start_column=1, end_row=meta_card_start_row, end_column=num_cols)
+    meta_title_cell = ws.cell(row=meta_card_start_row, column=1)
+    meta_title_cell.font = Font(name='Calibri', size=10, bold=True, color='475569')
     meta_title_cell.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[meta_box_start].height = 20
 
-    meta_fill = PatternFill(start_color='F8FAFC', end_color='F8FAFC', fill_type='solid')
-    thin_border_color = 'E2E8F0'
+    for c in range(1, num_cols + 1):
+        cell = ws.cell(row=meta_card_start_row, column=c)
+        cell.fill = card_header_fill
+        cell.border = Border(
+            top=Side(style='thin', color=card_border_color),
+            bottom=Side(style='thin', color=card_border_color),
+            left=Side(style='thin', color=card_border_color) if c == 1 else None,
+            right=Side(style='thin', color=card_border_color) if c == num_cols else None,
+        )
 
-    # Calculate symmetric column positioning for the centered metadata card
+    # Column configuration for internal items
     if num_cols >= 9:
-        card_start = 2
         lbl1_col = 2
         val1_start = 3
         val1_end = 4
-        if num_cols == 9:
-            lbl2_col = 6
-            val2_start = 7
-            val2_end = 8
-            card_end = 8
-        else:
-            lbl2_col = 7
-            val2_start = 8
-            val2_end = 9
-            card_end = 9
+        lbl2_col = 6
+        val2_start = 7
+        val2_end = 8
     elif num_cols >= 7:
-        card_start = 1
-        card_end = num_cols
         lbl1_col = 1
         val1_start = 2
         val1_end = 3
         lbl2_col = 4
         val2_start = 5
-        val2_end = num_cols
+        val2_end = num_cols - 1
     else:
-        card_start = 1
-        card_end = num_cols
         lbl1_col = 1
         val1_start = 2
         val1_end = 2
@@ -136,27 +137,28 @@ def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_
         val2_start = 4
         val2_end = num_cols
 
-    num_meta_rows = (len(metadata_items) + 1) // 2
-    start_meta_row = meta_box_start + 1
+    # Separate out Total Records for the dedicated summary footer bar
+    clean_meta_items = [item for item in metadata_items if item[0] != "Total Records"]
+    num_meta_rows = (len(clean_meta_items) + 1) // 2
+    start_meta_row = meta_card_start_row + 1
 
     for r_idx in range(num_meta_rows):
         current_meta_row = start_meta_row + r_idx
         ws.row_dimensions[current_meta_row].height = 22
 
-        item1 = metadata_items[r_idx * 2]
-        item2 = metadata_items[r_idx * 2 + 1] if (r_idx * 2 + 1) < len(metadata_items) else None
+        item1 = clean_meta_items[r_idx * 2]
+        item2 = clean_meta_items[r_idx * 2 + 1] if (r_idx * 2 + 1) < len(clean_meta_items) else None
 
-        # Fill background and borders for the card container
-        for c in range(card_start, card_end + 1):
+        # Fill background and outer card borders
+        for c in range(1, num_cols + 1):
             cell = ws.cell(row=current_meta_row, column=c)
-            cell.fill = meta_fill
-            top = Side(style='thin', color=thin_border_color) if r_idx == 0 else None
-            bottom = Side(style='thin', color=thin_border_color) if r_idx == num_meta_rows - 1 else None
-            left = Side(style='thin', color=thin_border_color) if c == card_start else None
-            right = Side(style='thin', color=thin_border_color) if c == card_end else None
-            cell.border = Border(top=top, bottom=bottom, left=left, right=right)
+            cell.fill = card_body_fill
+            cell.border = Border(
+                left=Side(style='thin', color=card_border_color) if c == 1 else None,
+                right=Side(style='thin', color=card_border_color) if c == num_cols else None,
+            )
 
-        # Item 1 (Left column of the card)
+        # Item 1 (Left side)
         c1 = ws.cell(row=current_meta_row, column=lbl1_col, value=f"{item1[0]}:")
         c1.font = Font(name='Calibri', size=10, bold=True, color='475569')
         c1.alignment = Alignment(horizontal='left', vertical='center')
@@ -167,7 +169,7 @@ def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_
         c2.font = Font(name='Calibri', size=10, color='1E293B')
         c2.alignment = Alignment(horizontal='left', vertical='center')
 
-        # Item 2 (Right column of the card)
+        # Item 2 (Right side)
         if item2:
             c3 = ws.cell(row=current_meta_row, column=lbl2_col, value=f"{item2[0]}:")
             c3.font = Font(name='Calibri', size=10, bold=True, color='475569')
@@ -179,8 +181,27 @@ def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_
             c4.font = Font(name='Calibri', size=10, color='1E293B')
             c4.alignment = Alignment(horizontal='left', vertical='center')
 
+    # Card Bottom Summary Bar (Total Records)
+    summary_row = start_meta_row + num_meta_rows
+    ws.row_dimensions[summary_row].height = 24
+    ws.cell(row=summary_row, column=1, value=f"TOTAL RECORDS MATCHING CRITERIA: {len(rows)}")
+    ws.merge_cells(start_row=summary_row, start_column=1, end_row=summary_row, end_column=num_cols)
+    summary_cell = ws.cell(row=summary_row, column=1)
+    summary_cell.font = Font(name='Calibri', size=10, bold=True, color='1E293B')
+    summary_cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    for c in range(1, num_cols + 1):
+        cell = ws.cell(row=summary_row, column=c)
+        cell.fill = card_header_fill
+        cell.border = Border(
+            top=Side(style='thin', color=card_border_color),
+            bottom=Side(style='thin', color=card_border_color),
+            left=Side(style='thin', color=card_border_color) if c == 1 else None,
+            right=Side(style='thin', color=card_border_color) if c == num_cols else None,
+        )
+
     # 4. Spacing row before Table
-    table_header_row = start_meta_row + num_meta_rows + 1
+    table_header_row = summary_row + 2
     ws.row_dimensions[table_header_row - 1].height = 14
 
     # 5. Data Table Header Row
@@ -205,7 +226,8 @@ def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_
 
     # 6. Data Rows
     data_font = Font(name='Calibri', size=10)
-    data_alignment = Alignment(vertical='center')
+    center_headers = {'id', 'room id', 'status', 'date joined', 'last login', 'created at', 'updated at',
+                      'rooms hosted', 'rooms joined', 'messages sent', 'participants count', 'messages count'}
 
     for r_offset, row_data in enumerate(rows, start=1):
         r_num = table_header_row + r_offset
@@ -216,8 +238,14 @@ def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_
         for col_idx, val in enumerate(row_data, start=1):
             cell = ws.cell(row=r_num, column=col_idx, value=val)
             cell.font = data_font
-            cell.alignment = data_alignment
             cell.border = table_border
+
+            header_name = str(headers[col_idx - 1]).strip().lower()
+            if header_name in center_headers:
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='left', vertical='center')
+
             if row_fill:
                 cell.fill = row_fill
 
