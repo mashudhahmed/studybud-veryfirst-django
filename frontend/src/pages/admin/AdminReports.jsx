@@ -71,7 +71,6 @@ const AdminReports = () => {
   const [userFilters, setUserFilters] = useState({
     role: 'all',
     user_id: 'all',
-    search: '',
   });
 
   // Room Report Form State
@@ -81,7 +80,6 @@ const AdminReports = () => {
     participant_id: 'all',
     start_date: '',
     end_date: '',
-    search: '',
   });
 
   // Loading state during file download
@@ -108,7 +106,6 @@ const AdminReports = () => {
       setUserFilters({
         role: 'all',
         user_id: 'all',
-        search: '',
       });
     } else {
       setRoomFilters({
@@ -117,7 +114,6 @@ const AdminReports = () => {
         participant_id: 'all',
         start_date: '',
         end_date: '',
-        search: '',
       });
     }
   };
@@ -244,7 +240,7 @@ const AdminReports = () => {
 
         {reportType === 'user' ? (
           /* USER REPORT FILTERS */
-          <div style={formGrid}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
             <div>
               <label style={labelStyle}>User Role</label>
               <select
@@ -273,17 +269,6 @@ const AdminReports = () => {
                 emptyLabel="All Users"
                 allowClear={true}
                 style={{ width: '100%' }}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Search Query</label>
-              <input
-                type="text"
-                placeholder="Search username or email..."
-                value={userFilters.search}
-                onChange={(e) => setUserFilters({ ...userFilters, search: e.target.value })}
-                style={inputStyle}
               />
             </div>
           </div>
@@ -340,7 +325,7 @@ const AdminReports = () => {
               </div>
             </div>
 
-            <div style={{ ...formGrid, marginTop: '18px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginTop: '18px' }}>
               <div>
                 <label style={labelStyle}>
                   From Date <span style={{ color: s.colors.error }}>*</span>
@@ -370,17 +355,6 @@ const AdminReports = () => {
                     ...inputStyle,
                     borderColor: !roomFilters.end_date ? s.colors.darkLight : s.colors.main,
                   }}
-                />
-              </div>
-
-              <div>
-                <label style={labelStyle}>Search Room Name</label>
-                <input
-                  type="text"
-                  placeholder="Filter by room name..."
-                  value={roomFilters.search}
-                  onChange={(e) => setRoomFilters({ ...roomFilters, search: e.target.value })}
-                  style={inputStyle}
                 />
               </div>
             </div>

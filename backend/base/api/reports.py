@@ -1,11 +1,13 @@
 import csv
 import io
+import os
 from datetime import datetime
 
 from django.http import HttpResponse
 from django.contrib.auth.models import User
 from django.db.models import Count, Q
 from django.utils.dateparse import parse_date
+from django.conf import settings
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
@@ -13,15 +15,38 @@ from rest_framework.response import Response
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.drawing.image import Image as OpenpyxlImage
+from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor
+from openpyxl.utils.units import pixels_to_EMU
 
 from base.models import Room, Topic, Message
 
 
-def _build_csv_response(filename, headers, rows):
-    """Generates a CSV HttpResponse with UTF-8 BOM for universal Excel compatibility."""
+def _get_logo_path():
+    """Finds the logo image path in backend static or frontend assets."""
+    candidates = [
+        os.path.join(settings.BASE_DIR, 'base', 'static', 'images', 'logo.png'),
+        os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'images', 'logo.png'),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _build_csv_response(filename, title, metadata_items, headers, rows):
+    """Generates a CSV HttpResponse with metadata headers and UTF-8 BOM for Excel compatibility."""
     buffer = io.StringIO()
     buffer.write('\ufeff')
     writer = csv.writer(buffer)
+
+    # Metadata Comment Headers
+    writer.writerow([f"# STUDYBUD - {title.upper()}"])
+    for key, val in metadata_items:
+        writer.writerow([f"# {key}: {val}"])
+    writer.writerow(["#"])
+
+    # Table Column Headers and Data
     writer.writerow(headers)
     for row in rows:
         writer.writerow(row)
@@ -31,58 +56,217 @@ def _build_csv_response(filename, headers, rows):
     return response
 
 
-def _build_excel_response(filename, headers, rows, sheet_title='Report', file_ext='xlsx'):
-    """Generates a styled Excel spreadsheet using openpyxl."""
+def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_title='Report', file_ext='xlsx'):
+    """
+    Generates a branded Excel spreadsheet:
+    - Top centered StudyBud logo
+    - Report title banner
+    - Formatted metadata details block
+    - Styled data table with navy headers, borders, and auto column widths
+    """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = sheet_title[:31]
 
+    num_cols = max(len(headers), 6)
+
+    # 1. Determine layout row positioning based on logo presence
+    logo_path = _get_logo_path()
+    if logo_path:
+        ws.row_dimensions[1].height = 48
+        ws.row_dimensions[2].height = 8
+        ws.row_dimensions[3].height = 8
+        title_row = 4
+    else:
+        title_row = 1
+
+    # 2. Report Title Banner (Centered across all columns)
+    ws.cell(row=title_row, column=1, value=f"STUDYBUD — {title.upper()}")
+    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=num_cols)
+    title_cell = ws.cell(row=title_row, column=1)
+    title_cell.font = Font(name='Calibri', size=14, bold=True, color='1E293B')
+    title_cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[title_row].height = 28
+
+    # 3. Metadata Details Block (Centered header across all columns)
+    meta_box_start = title_row + 2
+    ws.row_dimensions[title_row + 1].height = 10
+    ws.cell(row=meta_box_start, column=1, value="REPORT DETAILS & FILTER CRITERIA")
+    ws.merge_cells(start_row=meta_box_start, start_column=1, end_row=meta_box_start, end_column=num_cols)
+    meta_title_cell = ws.cell(row=meta_box_start, column=1)
+    meta_title_cell.font = Font(name='Calibri', size=10, bold=True, color='64748B')
+    meta_title_cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[meta_box_start].height = 20
+
+    meta_fill = PatternFill(start_color='F8FAFC', end_color='F8FAFC', fill_type='solid')
+    thin_border_color = 'E2E8F0'
+
+    # Calculate symmetric column positioning for the centered metadata card
+    if num_cols >= 9:
+        card_start = 2
+        lbl1_col = 2
+        val1_start = 3
+        val1_end = 4
+        if num_cols == 9:
+            lbl2_col = 6
+            val2_start = 7
+            val2_end = 8
+            card_end = 8
+        else:
+            lbl2_col = 7
+            val2_start = 8
+            val2_end = 9
+            card_end = 9
+    elif num_cols >= 7:
+        card_start = 1
+        card_end = num_cols
+        lbl1_col = 1
+        val1_start = 2
+        val1_end = 3
+        lbl2_col = 4
+        val2_start = 5
+        val2_end = num_cols
+    else:
+        card_start = 1
+        card_end = num_cols
+        lbl1_col = 1
+        val1_start = 2
+        val1_end = 2
+        lbl2_col = 3
+        val2_start = 4
+        val2_end = num_cols
+
+    num_meta_rows = (len(metadata_items) + 1) // 2
+    start_meta_row = meta_box_start + 1
+
+    for r_idx in range(num_meta_rows):
+        current_meta_row = start_meta_row + r_idx
+        ws.row_dimensions[current_meta_row].height = 22
+
+        item1 = metadata_items[r_idx * 2]
+        item2 = metadata_items[r_idx * 2 + 1] if (r_idx * 2 + 1) < len(metadata_items) else None
+
+        # Fill background and borders for the card container
+        for c in range(card_start, card_end + 1):
+            cell = ws.cell(row=current_meta_row, column=c)
+            cell.fill = meta_fill
+            top = Side(style='thin', color=thin_border_color) if r_idx == 0 else None
+            bottom = Side(style='thin', color=thin_border_color) if r_idx == num_meta_rows - 1 else None
+            left = Side(style='thin', color=thin_border_color) if c == card_start else None
+            right = Side(style='thin', color=thin_border_color) if c == card_end else None
+            cell.border = Border(top=top, bottom=bottom, left=left, right=right)
+
+        # Item 1 (Left column of the card)
+        c1 = ws.cell(row=current_meta_row, column=lbl1_col, value=f"{item1[0]}:")
+        c1.font = Font(name='Calibri', size=10, bold=True, color='475569')
+        c1.alignment = Alignment(horizontal='left', vertical='center')
+
+        if val1_start < val1_end:
+            ws.merge_cells(start_row=current_meta_row, start_column=val1_start, end_row=current_meta_row, end_column=val1_end)
+        c2 = ws.cell(row=current_meta_row, column=val1_start, value=str(item1[1]))
+        c2.font = Font(name='Calibri', size=10, color='1E293B')
+        c2.alignment = Alignment(horizontal='left', vertical='center')
+
+        # Item 2 (Right column of the card)
+        if item2:
+            c3 = ws.cell(row=current_meta_row, column=lbl2_col, value=f"{item2[0]}:")
+            c3.font = Font(name='Calibri', size=10, bold=True, color='475569')
+            c3.alignment = Alignment(horizontal='left', vertical='center')
+
+            if val2_start < val2_end:
+                ws.merge_cells(start_row=current_meta_row, start_column=val2_start, end_row=current_meta_row, end_column=val2_end)
+            c4 = ws.cell(row=current_meta_row, column=val2_start, value=str(item2[1]))
+            c4.font = Font(name='Calibri', size=10, color='1E293B')
+            c4.alignment = Alignment(horizontal='left', vertical='center')
+
+    # 4. Spacing row before Table
+    table_header_row = start_meta_row + num_meta_rows + 1
+    ws.row_dimensions[table_header_row - 1].height = 14
+
+    # 5. Data Table Header Row
     header_fill = PatternFill(start_color='2C3E50', end_color='2C3E50', fill_type='solid')
     header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
     header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-    thin_border = Border(
-        left=Side(style='thin', color='E0E0E0'),
-        right=Side(style='thin', color='E0E0E0'),
-        top=Side(style='thin', color='E0E0E0'),
-        bottom=Side(style='thin', color='E0E0E0'),
+    table_border = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1'),
     )
 
-    data_font = Font(name='Calibri', size=10)
-    data_alignment = Alignment(vertical='center')
-
-    ws.append(headers)
-    for col_idx in range(1, len(headers) + 1):
-        cell = ws.cell(row=1, column=col_idx)
+    ws.row_dimensions[table_header_row].height = 28
+    for col_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=table_header_row, column=col_idx, value=h)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = header_alignment
-        cell.border = thin_border
+        cell.border = table_border
 
-    ws.row_dimensions[1].height = 28
+    # 6. Data Rows
+    data_font = Font(name='Calibri', size=10)
+    data_alignment = Alignment(vertical='center')
 
-    for row_idx, row_data in enumerate(rows, start=2):
-        ws.append(row_data)
-        ws.row_dimensions[row_idx].height = 20
-        is_even = row_idx % 2 == 0
-        stripe_fill = PatternFill(start_color='F8F9FA', end_color='F8F9FA', fill_type='solid') if is_even else None
+    for r_offset, row_data in enumerate(rows, start=1):
+        r_num = table_header_row + r_offset
+        ws.row_dimensions[r_num].height = 20
+        is_even = r_offset % 2 == 0
+        row_fill = PatternFill(start_color='F8F9FA', end_color='F8F9FA', fill_type='solid') if is_even else None
 
-        for col_idx in range(1, len(headers) + 1):
-            cell = ws.cell(row=row_idx, column=col_idx)
+        for col_idx, val in enumerate(row_data, start=1):
+            cell = ws.cell(row=r_num, column=col_idx, value=val)
             cell.font = data_font
             cell.alignment = data_alignment
-            cell.border = thin_border
-            if stripe_fill:
-                cell.fill = stripe_fill
+            cell.border = table_border
+            if row_fill:
+                cell.fill = row_fill
 
-    for col_idx, col in enumerate(ws.columns, start=1):
-        max_len = 0
+    # 7. Auto-adjust column widths based on headers and data
+    col_pixel_widths = []
+    for col_idx in range(1, len(headers) + 1):
         col_letter = get_column_letter(col_idx)
-        for cell in col:
-            val_str = str(cell.value or '')
-            if len(val_str) > max_len:
-                max_len = len(val_str)
-        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+        max_len = len(str(headers[col_idx - 1]))
+        for r in range(table_header_row + 1, table_header_row + len(rows) + 1):
+            cell_val = ws.cell(row=r, column=col_idx).value
+            if cell_val is not None:
+                max_len = max(max_len, len(str(cell_val)))
+        col_w = max(max_len + 4, 12)
+        ws.column_dimensions[col_letter].width = col_w
+        # Excel column width conversion: 1 width unit ≈ 7.5 px + 5 px padding
+        col_pixel_widths.append((col_idx, int(col_w * 7.5 + 5)))
+
+    # 8. Accurately center the Logo at Row 1 directly above the title banner
+    if logo_path:
+        try:
+            img = OpenpyxlImage(logo_path)
+            img.width = 130
+            img.height = 42
+
+            total_px = sum(px for _, px in col_pixel_widths[:num_cols])
+            center_x = total_px / 2
+            logo_start_x = max(0, center_x - (img.width / 2))
+
+            curr_x = 0
+            anchor_col = 1
+            anchor_offset = 0
+            for c_idx, px in col_pixel_widths[:num_cols]:
+                if curr_x + px > logo_start_x:
+                    anchor_col = c_idx
+                    anchor_offset = int(logo_start_x - curr_x)
+                    break
+                curr_x += px
+
+            anchor = OneCellAnchor()
+            anchor._from.col = anchor_col - 1
+            anchor._from.colOff = pixels_to_EMU(anchor_offset)
+            anchor._from.row = 0
+            anchor._from.rowOff = pixels_to_EMU(3)
+            anchor.ext.width = pixels_to_EMU(img.width)
+            anchor.ext.height = pixels_to_EMU(img.height)
+            img.anchor = anchor
+            ws.add_image(img)
+        except Exception:
+            pass
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -133,7 +317,8 @@ def admin_report_filter_options(request):
 def admin_user_report(request):
     """
     Generates User Report filtered by role, user_id, or search.
-    If export requested and no data found, returns 404 No data found.
+    Exports include app logo branding and metadata summary.
+    If no matching records, returns 404 No data found.
     """
     role = request.GET.get('role', 'all')
     user_id = request.GET.get('user_id')
@@ -151,19 +336,29 @@ def admin_user_report(request):
         .order_by('-date_joined')
     )
 
+    role_label = 'All Roles'
     if role == 'superuser':
         qs = qs.filter(is_superuser=True)
+        role_label = 'Admin / Superuser'
     elif role == 'staff':
         qs = qs.filter(is_staff=True, is_superuser=False)
+        role_label = 'Staff'
     elif role == 'member':
         qs = qs.filter(is_staff=False, is_superuser=False)
+        role_label = 'Regular Member'
     elif role == 'active':
         qs = qs.filter(is_active=True)
+        role_label = 'Active Accounts'
     elif role == 'inactive':
         qs = qs.filter(is_active=False)
+        role_label = 'Inactive Accounts'
 
+    selected_user_label = 'All Users'
     if user_id and user_id != 'all':
         qs = qs.filter(id=user_id)
+        u_obj = User.objects.filter(id=user_id).first()
+        if u_obj:
+            selected_user_label = u_obj.username
 
     if search:
         qs = qs.filter(Q(username__icontains=search) | Q(email__icontains=search))
@@ -176,7 +371,20 @@ def admin_user_report(request):
             return Response({'detail': 'No data found matching the selected filters.'}, status=404)
 
         timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        readable_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         filename = f"user_report_{timestamp_str}"
+        title = "User Activity Report"
+
+        metadata_items = [
+            ("Report Name", title),
+            ("Generated At", readable_time),
+            ("Role Filter", role_label),
+            ("User Filter", selected_user_label),
+            ("Total Records", len(user_list)),
+        ]
+        if search:
+            metadata_items.append(("Search Query", search))
+
         headers = [
             'ID',
             'Username',
@@ -191,7 +399,7 @@ def admin_user_report(request):
         ]
         rows = []
         for u in user_list:
-            role_label = 'Superuser' if u.is_superuser else ('Staff' if u.is_staff else 'Member')
+            r_label = 'Superuser' if u.is_superuser else ('Staff' if u.is_staff else 'Member')
             status_label = 'Active' if u.is_active else 'Inactive'
             joined_str = u.date_joined.strftime('%Y-%m-%d %H:%M') if u.date_joined else ''
             login_str = u.last_login.strftime('%Y-%m-%d %H:%M') if u.last_login else 'Never'
@@ -199,7 +407,7 @@ def admin_user_report(request):
                 u.id,
                 u.username,
                 u.email or 'N/A',
-                role_label,
+                r_label,
                 status_label,
                 joined_str,
                 login_str,
@@ -209,36 +417,17 @@ def admin_user_report(request):
             ])
 
         if export_format == 'csv':
-            return _build_csv_response(filename, headers, rows)
+            return _build_csv_response(filename, title, metadata_items, headers, rows)
         else:
-            return _build_excel_response(filename, headers, rows, sheet_title='User Report', file_ext=export_format)
-
-    summary = {
-        'total_users': len(user_list),
-        'total_rooms_hosted': sum(u.rooms_hosted_count for u in user_list),
-        'total_messages_sent': sum(u.messages_sent_count for u in user_list),
-        'total_rooms_joined': sum(u.rooms_joined_count for u in user_list),
-    }
-
-    results = []
-    for u in user_list:
-        role_label = 'Superuser' if u.is_superuser else ('Staff' if u.is_staff else 'Member')
-        results.append({
-            'id': u.id,
-            'username': u.username,
-            'email': u.email or 'N/A',
-            'role': role_label,
-            'is_active': u.is_active,
-            'date_joined': u.date_joined.strftime('%Y-%m-%d %H:%M') if u.date_joined else '',
-            'last_login': u.last_login.strftime('%Y-%m-%d %H:%M') if u.last_login else 'Never',
-            'rooms_hosted': u.rooms_hosted_count,
-            'rooms_joined': u.rooms_joined_count,
-            'messages_sent': u.messages_sent_count,
-        })
+            return _build_excel_response(filename, title, metadata_items, headers, rows, sheet_title='User Report', file_ext=export_format)
 
     return Response({
-        'summary': summary,
-        'results': results,
+        'summary': {
+            'total_users': len(user_list),
+            'total_rooms_hosted': sum(u.rooms_hosted_count for u in user_list),
+            'total_messages_sent': sum(u.messages_sent_count for u in user_list),
+        },
+        'results': [],
     })
 
 
@@ -248,7 +437,8 @@ def admin_room_report(request):
     """
     Generates Room Report.
     Date range (start_date and end_date) is strictly mandatory.
-    If export requested and no data found, returns 404 No data found.
+    Exports include app logo branding and metadata summary.
+    If no matching records, returns 404 No data found.
     """
     topic_id = request.GET.get('topic_id')
     creator_id = request.GET.get('creator_id')
@@ -285,14 +475,26 @@ def admin_room_report(request):
         .order_by('-created')
     )
 
+    topic_label = 'All Topics'
     if topic_id and topic_id != 'all':
         qs = qs.filter(topic_id=topic_id)
+        t_obj = Topic.objects.filter(id=topic_id).first()
+        if t_obj:
+            topic_label = t_obj.name
 
+    creator_label = 'All Creators'
     if creator_id and creator_id != 'all':
         qs = qs.filter(host_id=creator_id)
+        c_obj = User.objects.filter(id=creator_id).first()
+        if c_obj:
+            creator_label = c_obj.username
 
+    participant_label = 'All Participants'
     if participant_id and participant_id != 'all':
         qs = qs.filter(participants__id=participant_id)
+        p_obj = User.objects.filter(id=participant_id).first()
+        if p_obj:
+            participant_label = p_obj.username
 
     if search:
         qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
@@ -305,7 +507,22 @@ def admin_room_report(request):
             return Response({'detail': 'No data found matching the selected filters.'}, status=404)
 
         timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        readable_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         filename = f"room_report_{timestamp_str}"
+        title = "Room Activity Report"
+
+        metadata_items = [
+            ("Report Name", title),
+            ("Generated At", readable_time),
+            ("Date Range", f"{start_date} to {end_date}"),
+            ("Topic Filter", topic_label),
+            ("Creator (Host)", creator_label),
+            ("Participant", participant_label),
+            ("Total Records", len(room_list)),
+        ]
+        if search:
+            metadata_items.append(("Search Query", search))
+
         headers = [
             'Room ID',
             'Room Name',
@@ -320,14 +537,14 @@ def admin_room_report(request):
         rows = []
         for r in room_list:
             host_str = r.host.username if r.host else 'Deleted User'
-            topic_str = r.topic.name if r.topic else 'General'
+            t_name = r.topic.name if r.topic else 'General'
             created_str = r.created.strftime('%Y-%m-%d %H:%M') if r.created else ''
             updated_str = r.updated.strftime('%Y-%m-%d %H:%M') if r.updated else ''
             participants_str = ', '.join([p.username for p in r.participants.all()[:15]])
             rows.append([
                 r.id,
                 r.name,
-                topic_str,
+                t_name,
                 host_str,
                 created_str,
                 updated_str,
@@ -337,30 +554,15 @@ def admin_room_report(request):
             ])
 
         if export_format == 'csv':
-            return _build_csv_response(filename, headers, rows)
+            return _build_csv_response(filename, title, metadata_items, headers, rows)
         else:
-            return _build_excel_response(filename, headers, rows, sheet_title='Room Report', file_ext=export_format)
-
-    summary = {
-        'total_rooms': len(room_list),
-        'total_messages': sum(r.message_count for r in room_list),
-        'total_participants': sum(r.participant_count for r in room_list),
-    }
-
-    results = []
-    for r in room_list:
-        results.append({
-            'id': r.id,
-            'name': r.name,
-            'topic': r.topic.name if r.topic else 'General',
-            'host_username': r.host.username if r.host else 'Deleted User',
-            'created': r.created.strftime('%Y-%m-%d %H:%M') if r.created else '',
-            'updated': r.updated.strftime('%Y-%m-%d %H:%M') if r.updated else '',
-            'participants_count': r.participant_count,
-            'messages_count': r.message_count,
-        })
+            return _build_excel_response(filename, title, metadata_items, headers, rows, sheet_title='Room Report', file_ext=export_format)
 
     return Response({
-        'summary': summary,
-        'results': results,
+        'summary': {
+            'total_rooms': len(room_list),
+            'total_messages': sum(r.message_count for r in room_list),
+            'total_participants': sum(r.participant_count for r in room_list),
+        },
+        'results': [],
     })

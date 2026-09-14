@@ -56,6 +56,13 @@ class ReportApiTests(TestCase):
         self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8')
         self.assertIn('attachment;', res['Content-Disposition'])
 
+    def test_user_report_xlsx_export(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.get('/api/admin/reports/users/?export=xlsx')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertIn('attachment;', res['Content-Disposition'])
+
     def test_user_report_no_data_found_returns_404(self):
         self.client.force_authenticate(user=self.admin_user)
         # Search for non-existent user
