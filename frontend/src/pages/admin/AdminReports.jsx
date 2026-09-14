@@ -14,11 +14,17 @@ const reportTypes = [
   { value: 'room', label: 'Room Report' },
 ];
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 500];
+
 const AdminReports = () => {
   const { showToast } = useToast();
 
   // Active Report Tab: 'user' | 'room'
   const [reportType, setReportType] = useState('user');
+
+  // Pagination State
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // Metadata for filter dropdowns
   const [filterOptions, setFilterOptions] = useState({
@@ -71,6 +77,7 @@ const AdminReports = () => {
     setLoading(true);
     setReportData(null);
     setHasViewed(true);
+    setPage(1);
 
     try {
       if (reportType === 'user') {
@@ -107,6 +114,7 @@ const AdminReports = () => {
     }
     setReportData(null);
     setHasViewed(false);
+    setPage(1);
   };
 
   // Switch report type
@@ -115,6 +123,7 @@ const AdminReports = () => {
     setReportType(newType);
     setReportData(null);
     setHasViewed(false);
+    setPage(1);
   };
 
   // Handle direct file download
@@ -173,6 +182,14 @@ const AdminReports = () => {
     padding: '14px 18px',
     flex: '1 1 180px',
   };
+
+  // Pagination Calculations
+  const allResults = reportData?.results || [];
+  const totalCount = allResults.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const startIndex = (currentPage - 1) * pageSize;
+  const paginatedResults = allResults.slice(startIndex, startIndex + pageSize);
 
   return (
     <div style={{ paddingBottom: '40px' }}>
@@ -483,7 +500,7 @@ const AdminReports = () => {
               }}
             >
               <span style={{ fontSize: '14px', fontWeight: '600', color: '#fff' }}>
-                On-Screen Preview ({reportData.results.length} records)
+                On-Screen Preview ({totalCount > 0 ? `Showing ${startIndex + 1}–${Math.min(startIndex + pageSize, totalCount)} of ${totalCount} records` : '0 records'})
               </span>
             </div>
 
@@ -506,8 +523,8 @@ const AdminReports = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {reportData.results.length > 0 ? (
-                      reportData.results.map((u) => (
+                    {paginatedResults.length > 0 ? (
+                      paginatedResults.map((u) => (
                         <tr key={u.id}>
                           <td style={{ ...s.td, color: s.colors.gray }}>#{u.id}</td>
                           <td style={{ ...s.td, fontWeight: '600' }}>{u.username}</td>
@@ -572,8 +589,8 @@ const AdminReports = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {reportData.results.length > 0 ? (
-                      reportData.results.map((r) => (
+                    {paginatedResults.length > 0 ? (
+                      paginatedResults.map((r) => (
                         <tr key={r.id}>
                           <td style={{ ...s.td, color: s.colors.gray }}>#{r.id}</td>
                           <td style={{ ...s.td, fontWeight: '600' }}>{r.name}</td>
@@ -602,6 +619,62 @@ const AdminReports = () => {
                 </table>
               )}
             </div>
+
+            {/* Pagination Controls */}
+            {totalCount > 0 && (
+              <div
+                style={{
+                  ...s.pagination,
+                  padding: '14px 18px',
+                  margin: 0,
+                  borderTop: `1px solid ${s.colors.dark}`,
+                  background: 'rgba(0,0,0,0.1)',
+                }}
+              >
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    color: s.colors.lightGray,
+                    fontSize: 13,
+                  }}
+                >
+                  Rows
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                    style={{ ...s.selectInput, minWidth: 76, padding: '6px 26px 6px 10px' }}
+                  >
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  style={s.btn('default')}
+                  disabled={currentPage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </button>
+                <span style={{ fontSize: 13 }}>
+                  Page {currentPage} of {totalPages} · {totalCount} total
+                </span>
+                <button
+                  style={s.btn('default')}
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Export Options Bar Below Table */}
