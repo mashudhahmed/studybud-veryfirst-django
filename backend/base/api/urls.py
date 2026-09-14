@@ -3,6 +3,7 @@ from rest_framework.authtoken.views import obtain_auth_token
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import views
+from . import reports
 
 urlpatterns = [
 
@@ -60,4 +61,9 @@ urlpatterns = [
     path('admin/topics/create/', views.adminCreateTopic),
     path('admin/topics/<str:pk>/update/', views.adminUpdateTopic),
     path('admin/topics/<str:pk>/delete/', views.adminDeleteTopic),
+
+    # admin reports
+    path('admin/reports/options/', reports.admin_report_filter_options),
+    path('admin/reports/users/', reports.admin_user_report),
+    path('admin/reports/rooms/', reports.admin_room_report),
 ]

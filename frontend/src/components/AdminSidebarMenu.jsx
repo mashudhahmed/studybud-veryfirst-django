@@ -6,6 +6,7 @@ const links = [
   { to: '/admin/rooms', label: 'Rooms' },
   { to: '/admin/topics', label: 'Topics' },
   { to: '/admin/users', label: 'Users' },
+  { to: '/admin/reports', label: 'Reports' },
 ];
 
 const AdminSidebarMenu = () => {

@@ -7,6 +7,7 @@ import AdminRooms from './admin/AdminRooms';
 import AdminTopics from './admin/AdminTopics';
 import AdminUsers from './admin/AdminUsers';
 import AdminEditRoom from './admin/AdminEditRoom';
+import AdminReports from './admin/AdminReports';
 import { getRooms } from '../api/rooms';
 import { getTopics } from '../api/topics';
 
@@ -30,7 +31,9 @@ const Home = () => {
         ? 'topics'
         : location.pathname.startsWith('/admin/users')
           ? 'users'
-          : null;
+          : location.pathname.startsWith('/admin/reports')
+            ? 'reports'
+            : null;
 
   useEffect(() => {
     if (!adminView) fetchRooms();
@@ -196,6 +199,7 @@ const Home = () => {
           {adminView === 'room-edit' && <AdminEditRoom />}
           {adminView === 'topics' && <AdminTopics />}
           {adminView === 'users' && <AdminUsers />}
+          {adminView === 'reports' && <AdminReports />}
         </div>
       ) : (
         <>

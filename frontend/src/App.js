@@ -131,6 +131,14 @@ const App = () => {
                 </AdminRoute>
               }
             />
+            <Route
+              path="/admin/reports"
+              element={
+                <AdminRoute>
+                  <Home />
+                </AdminRoute>
+              }
+            />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
