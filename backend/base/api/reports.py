@@ -23,15 +23,28 @@ from base.models import Room, Topic, Message
 
 
 def _get_logo_path():
-    """Finds the logo image path in backend static or frontend assets."""
+    """Finds the most recently updated logo image path across backend static and frontend assets."""
     candidates = [
-        os.path.join(settings.BASE_DIR, 'base', 'static', 'images', 'logo.png'),
         os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'images', 'logo.png'),
+        os.path.join(settings.BASE_DIR, 'base', 'static', 'images', 'logo.png'),
     ]
-    for p in candidates:
-        if os.path.exists(p):
-            return p
-    return None
+    existing = [p for p in candidates if os.path.exists(p)]
+    if not existing:
+        return None
+
+    # Pick the most recently modified logo
+    latest = max(existing, key=os.path.getmtime)
+
+    # Sync to older copy so both frontend and backend stay consistent
+    try:
+        import shutil
+        for other in existing:
+            if other != latest and os.path.getmtime(other) < os.path.getmtime(latest):
+                shutil.copy2(latest, other)
+    except Exception:
+        pass
+
+    return latest
 
 
 def _build_csv_response(filename, title, metadata_items, headers, rows):
@@ -114,20 +127,20 @@ def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_
             right=Side(style='thin', color=card_border_color) if c == num_cols else None,
         )
 
-    # Column configuration for internal items
+    # Column configuration for internal items (Option 1: centered block with balanced margins)
     if num_cols >= 9:
-        lbl1_col = 2
-        val1_start = 3
-        val1_end = 4
+        lbl1_col = 3
+        val1_start = 4
+        val1_end = 5
         lbl2_col = 6
         val2_start = 7
         val2_end = 8
     elif num_cols >= 7:
-        lbl1_col = 1
-        val1_start = 2
-        val1_end = 3
-        lbl2_col = 4
-        val2_start = 5
+        lbl1_col = 2
+        val1_start = 3
+        val1_end = 4
+        lbl2_col = 5
+        val2_start = 6
         val2_end = num_cols - 1
     else:
         lbl1_col = 1
@@ -267,8 +280,14 @@ def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_
     if logo_path:
         try:
             img = OpenpyxlImage(logo_path)
-            img.width = 130
-            img.height = 42
+            target_height = 42
+            if img.height and img.height > 0:
+                aspect_ratio = img.width / img.height
+                img.height = target_height
+                img.width = max(24, int(target_height * aspect_ratio))
+            else:
+                img.width = 130
+                img.height = 42
 
             total_px = sum(px for _, px in col_pixel_widths[:num_cols])
             center_x = total_px / 2
