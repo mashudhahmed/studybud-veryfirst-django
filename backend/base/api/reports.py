@@ -413,7 +413,7 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
     <title>StudyBud — {html.escape(title)}</title>
     <style>
         @page {{
-            size: landscape;
+            size: auto;
             margin: 10mm 12mm;
         }}
         * {{
@@ -565,6 +565,12 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
             font-size: 12px;
             border: 1px solid #cbd5e1;
         }}
+        .report-table thead {{
+            display: table-header-group;
+        }}
+        .report-table tfoot {{
+            display: table-footer-group;
+        }}
         .report-table th {{
             background: #2c3e50;
             color: #ffffff;
@@ -584,6 +590,9 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
         .report-table tr.even-row {{
             background-color: #f8fafc;
         }}
+        .report-table tr {{
+            page-break-inside: avoid;
+        }}
         .text-center {{
             text-align: center;
         }}
@@ -602,7 +611,7 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
             body {{
                 background: #ffffff !important;
                 color: #000000 !important;
-                font-size: 10pt;
+                font-size: 9pt;
             }}
             .report-wrapper {{
                 margin: 0 !important;
@@ -610,12 +619,64 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
                 box-shadow: none !important;
                 border: none !important;
                 max-width: 100% !important;
+                width: 100% !important;
+            }}
+            .report-header-title {{
+                font-size: 16pt !important;
+                margin: 0 0 14px !important;
+            }}
+            .meta-card {{
+                page-break-inside: avoid !important;
+                margin-bottom: 16px !important;
+                border: 1px solid #cbd5e1 !important;
+            }}
+            .meta-header-bar {{
+                padding: 5px 12px !important;
+                font-size: 9pt !important;
+            }}
+            .meta-content {{
+                padding: 10px 24px !important;
+                gap: 6px !important;
+            }}
+            .meta-row {{
+                font-size: 8.5pt !important;
+                gap: 20px !important;
+            }}
+            .meta-footer-bar {{
+                padding: 5px 12px !important;
+                font-size: 8.5pt !important;
+            }}
+            .report-table {{
+                width: 100% !important;
+                font-size: 8.5pt !important;
+            }}
+            .report-table thead {{
+                display: table-header-group !important;
+            }}
+            .report-table tfoot {{
+                display: table-footer-group !important;
+            }}
+            .report-table th {{
+                background: #2c3e50 !important;
+                color: #ffffff !important;
+                padding: 6px 6px !important;
+                font-size: 8pt !important;
+                border: 1px solid #94a3b8 !important;
+            }}
+            .report-table td {{
+                padding: 5px 6px !important;
+                font-size: 8pt !important;
+                border: 1px solid #cbd5e1 !important;
+                word-break: break-word !important;
+                overflow-wrap: break-word !important;
             }}
             .report-table tr {{
                 page-break-inside: avoid !important;
             }}
-            .meta-card {{
-                page-break-inside: avoid !important;
+            .report-footer {{
+                margin-top: 14px !important;
+                font-size: 8pt !important;
+                color: #64748b !important;
             }}
         }}
     </style>

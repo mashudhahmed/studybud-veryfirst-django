@@ -103,7 +103,9 @@ class ReportApiTests(TestCase):
         content = res.content.decode('utf-8')
         self.assertIn('STUDYBUD — USER ACTIVITY REPORT', content)
         self.assertIn('REPORT DETAILS &amp; FILTER CRITERIA', content)
-        self.assertIn('Print Report', content)
+        self.assertIn('size: auto', content)
+        self.assertIn('table-header-group', content)
+        self.assertIn('page-break-inside: avoid', content)
 
     def test_room_report_html_export_with_auto_print(self):
         self.client.force_authenticate(user=self.admin_user)
@@ -117,4 +119,7 @@ class ReportApiTests(TestCase):
         content = res.content.decode('utf-8')
         self.assertIn('STUDYBUD — ROOM ACTIVITY REPORT', content)
         self.assertIn('window.print()', content)
+        self.assertIn('size: auto', content)
+        self.assertIn('table-header-group', content)
+
 
