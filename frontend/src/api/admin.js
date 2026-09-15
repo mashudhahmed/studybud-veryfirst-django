@@ -239,3 +239,44 @@ export const downloadReport = async ({ type, format = 'csv', filters = {} }) => 
     throw new Error(extractErrorMessage(error, 'No data found matching the selected filters.'));
   }
 };
+
+export const openReportHtmlView = async ({ type, filters = {}, autoPrint = false }) => {
+  try {
+    const params = new URLSearchParams();
+    params.append('export', 'html');
+    if (autoPrint) {
+      params.append('auto_print', '1');
+    }
+
+    Object.entries(filters).forEach(([key, val]) => {
+      if (val !== undefined && val !== null && val !== '' && val !== 'all') {
+        params.append(key, val);
+      }
+    });
+
+    const endpoint = type === 'user' ? '/admin/reports/users/' : '/admin/reports/rooms/';
+    const response = await client.get(`${endpoint}?${params.toString()}`, {
+      responseType: 'blob',
+    });
+
+    const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' });
+    const viewUrl = window.URL.createObjectURL(blob);
+    window.open(viewUrl, '_blank');
+  } catch (error) {
+    if (error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text();
+        const json = JSON.parse(text);
+        if (json.detail) {
+          throw new Error(json.detail);
+        }
+      } catch (parseErr) {
+        if (parseErr.message && !parseErr.message.includes('JSON')) {
+          throw parseErr;
+        }
+      }
+    }
+    throw new Error(extractErrorMessage(error, 'Failed to generate HTML report view.'));
+  }
+};
+

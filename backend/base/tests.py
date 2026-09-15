@@ -94,3 +94,27 @@ class ReportApiTests(TestCase):
         res_out = self.client.get(f'/api/admin/reports/rooms/?export=csv&start_date={past}&end_date={older}')
         self.assertEqual(res_out.status_code, 404)
         self.assertIn('detail', res_out.data)
+
+    def test_user_report_html_export(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.get('/api/admin/reports/users/?export=html')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'text/html; charset=utf-8')
+        content = res.content.decode('utf-8')
+        self.assertIn('STUDYBUD — USER ACTIVITY REPORT', content)
+        self.assertIn('REPORT DETAILS &amp; FILTER CRITERIA', content)
+        self.assertIn('Print Report', content)
+
+    def test_room_report_html_export_with_auto_print(self):
+        self.client.force_authenticate(user=self.admin_user)
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        tomorrow = today + timedelta(days=1)
+
+        res = self.client.get(f'/api/admin/reports/rooms/?export=html&auto_print=1&start_date={yesterday}&end_date={tomorrow}')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'text/html; charset=utf-8')
+        content = res.content.decode('utf-8')
+        self.assertIn('STUDYBUD — ROOM ACTIVITY REPORT', content)
+        self.assertIn('window.print()', content)
+

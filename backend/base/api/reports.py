@@ -1,6 +1,8 @@
 import csv
 import io
 import os
+import html
+import base64
 from datetime import datetime
 
 from django.http import HttpResponse
@@ -328,6 +330,348 @@ def _build_excel_response(filename, title, metadata_items, headers, rows, sheet_
     return response
 
 
+def _build_html_response(filename, title, metadata_items, headers, rows, auto_print=False):
+    """
+    Generates a high-fidelity, printable HTML document matching the branded executive report design:
+    - Interactive screen toolbar with Print and Close buttons
+    - Centered cropped StudyBud logo badge
+    - Centered title banner
+    - Formatted executive metadata card
+    - Clean styled data table with navy header, borders, zebra-striping, and center-aligned numeric/status columns
+    - Optimized @media print stylesheet for clean landscape printing
+    """
+    # 1. Base64 encode the logo so the document is completely self-contained
+    logo_img_tag = ""
+    logo_path = _get_logo_path()
+    if logo_path and os.path.exists(logo_path):
+        try:
+            with open(logo_path, "rb") as img_f:
+                b64_content = base64.b64encode(img_f.read()).decode('utf-8')
+                logo_img_tag = f'<img src="data:image/png;base64,{b64_content}" alt="StudyBud Logo" class="logo-img" />'
+        except Exception:
+            logo_img_tag = ""
+
+    # 2. Separate out Total Records for the summary bar
+    clean_meta = [item for item in metadata_items if item[0] != "Total Records"]
+    total_records = len(rows)
+
+    # Build metadata grid pairs
+    meta_pairs = []
+    for i in range(0, len(clean_meta), 2):
+        item1 = clean_meta[i]
+        item2 = clean_meta[i + 1] if (i + 1) < len(clean_meta) else None
+        meta_pairs.append((item1, item2))
+
+    meta_rows_html = []
+    for p1, p2 in meta_pairs:
+        l1 = html.escape(str(p1[0]))
+        v1 = html.escape(str(p1[1]))
+        if p2:
+            l2 = html.escape(str(p2[0]))
+            v2 = html.escape(str(p2[1]))
+            right_col = f'<div class="meta-field"><span class="meta-label">{l2}:</span> <span class="meta-val">{v2}</span></div>'
+        else:
+            right_col = '<div></div>'
+
+        meta_rows_html.append(f'''
+            <div class="meta-row">
+                <div class="meta-field"><span class="meta-label">{l1}:</span> <span class="meta-val">{v1}</span></div>
+                {right_col}
+            </div>
+        ''')
+    meta_body_rendered = "\n".join(meta_rows_html)
+
+    # 3. Column headers & cells
+    center_headers = {
+        'id', 'room id', 'status', 'date joined', 'last login', 'created at', 'updated at',
+        'rooms hosted', 'rooms joined', 'messages sent', 'participants count', 'messages count'
+    }
+
+    headers_rendered = "".join([f'<th>{html.escape(str(h))}</th>' for h in headers])
+
+    rows_html = []
+    for idx, r in enumerate(rows):
+        is_even = (idx % 2 == 1)
+        row_cls = ' class="even-row"' if is_even else ''
+        cells = []
+        for c_idx, val in enumerate(r):
+            h_name = str(headers[c_idx]).strip().lower()
+            align_cls = ' class="text-center"' if h_name in center_headers else ''
+            val_str = html.escape(str(val)) if val is not None else ''
+            cells.append(f'<td{align_cls}>{val_str}</td>')
+        rows_html.append(f'<tr{row_cls}>{"".join(cells)}</tr>')
+
+    table_rows_rendered = "\n".join(rows_html)
+
+    auto_print_script = "<script>window.onload = function() { setTimeout(function() { window.print(); }, 400); };</script>" if auto_print else ""
+
+    html_content = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyBud — {html.escape(title)}</title>
+    <style>
+        @page {{
+            size: landscape;
+            margin: 10mm 12mm;
+        }}
+        * {{
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }}
+        body {{
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f1f5f9;
+            color: #1e293b;
+        }}
+        .screen-toolbar {{
+            position: sticky;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #1e1f2b;
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 9999;
+        }}
+        .toolbar-title {{
+            color: #f0f0f5;
+            font-weight: 700;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        .toolbar-actions {{
+            display: flex;
+            gap: 10px;
+        }}
+        .btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 7px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            text-decoration: none;
+            transition: all 0.15s ease;
+        }}
+        .btn-print {{
+            background: #5ec8e0;
+            color: #1e1f2b;
+        }}
+        .btn-print:hover {{
+            filter: brightness(1.1);
+        }}
+        .btn-close {{
+            background: #2a2b3d;
+            color: #a8aabc;
+            border: 1px solid #40425a;
+        }}
+        .btn-close:hover {{
+            color: #ffffff;
+            border-color: #5a5c78;
+        }}
+        .report-wrapper {{
+            max-width: 1200px;
+            margin: 28px auto;
+            background: #ffffff;
+            padding: 36px 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+            border: 1px solid #e2e8f0;
+        }}
+        .logo-container {{
+            text-align: center;
+            margin-bottom: 12px;
+        }}
+        .logo-img {{
+            height: 46px;
+            width: auto;
+            object-fit: contain;
+        }}
+        .report-header-title {{
+            text-align: center;
+            font-size: 20px;
+            font-weight: 800;
+            color: #1e293b;
+            letter-spacing: 0.5px;
+            margin: 0 0 24px;
+        }}
+        .meta-card {{
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 26px;
+            background: #f8fafc;
+        }}
+        .meta-header-bar {{
+            background: #f1f5f9;
+            border-bottom: 1px solid #cbd5e1;
+            padding: 8px 16px;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 700;
+            color: #475569;
+            letter-spacing: 0.5px;
+        }}
+        .meta-content {{
+            padding: 14px 48px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }}
+        .meta-row {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            font-size: 13px;
+        }}
+        .meta-field {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .meta-label {{
+            font-weight: 700;
+            color: #475569;
+            min-width: 120px;
+        }}
+        .meta-val {{
+            color: #1e293b;
+        }}
+        .meta-footer-bar {{
+            background: #f1f5f9;
+            border-top: 1px solid #cbd5e1;
+            padding: 8px 16px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 700;
+            color: #1e293b;
+        }}
+        .report-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            border: 1px solid #cbd5e1;
+        }}
+        .report-table th {{
+            background: #2c3e50;
+            color: #ffffff;
+            font-weight: 700;
+            padding: 9px 10px;
+            text-align: center;
+            border: 1px solid #cbd5e1;
+            font-size: 11px;
+            letter-spacing: 0.3px;
+        }}
+        .report-table td {{
+            padding: 7px 10px;
+            border: 1px solid #e2e8f0;
+            color: #334155;
+            vertical-align: middle;
+        }}
+        .report-table tr.even-row {{
+            background-color: #f8fafc;
+        }}
+        .text-center {{
+            text-align: center;
+        }}
+        .report-footer {{
+            margin-top: 24px;
+            text-align: right;
+            font-size: 11px;
+            color: #94a3b8;
+        }}
+
+        /* Print Specific Styles */
+        @media print {{
+            .no-print {{
+                display: none !important;
+            }}
+            body {{
+                background: #ffffff !important;
+                color: #000000 !important;
+                font-size: 10pt;
+            }}
+            .report-wrapper {{
+                margin: 0 !important;
+                padding: 0 !important;
+                box-shadow: none !important;
+                border: none !important;
+                max-width: 100% !important;
+            }}
+            .report-table tr {{
+                page-break-inside: avoid !important;
+            }}
+            .meta-card {{
+                page-break-inside: avoid !important;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="screen-toolbar no-print">
+        <div class="toolbar-title">
+            <span>StudyBud Administrative Reports</span>
+        </div>
+        <div class="toolbar-actions">
+            <button class="btn btn-print" onclick="window.print()">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                Print Report
+            </button>
+            <button class="btn btn-close" onclick="window.close()">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <div class="report-wrapper">
+        <div class="logo-container">
+            {logo_img_tag}
+        </div>
+        <h1 class="report-header-title">STUDYBUD — {html.escape(title.upper())}</h1>
+
+        <div class="meta-card">
+            <div class="meta-header-bar">REPORT DETAILS &amp; FILTER CRITERIA</div>
+            <div class="meta-content">
+                {meta_body_rendered}
+            </div>
+            <div class="meta-footer-bar">TOTAL RECORDS MATCHING CRITERIA: {total_records}</div>
+        </div>
+
+        <table class="report-table">
+            <thead>
+                <tr>
+                    {headers_rendered}
+                </tr>
+            </thead>
+            <tbody>
+                {table_rows_rendered}
+            </tbody>
+        </table>
+
+        <div class="report-footer">
+            Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} — StudyBud Administration
+        </div>
+    </div>
+    {auto_print_script}
+</body>
+</html>'''
+
+    return HttpResponse(html_content, content_type='text/html; charset=utf-8')
+
+
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def admin_report_filter_options(request):
@@ -413,7 +757,7 @@ def admin_user_report(request):
     user_list = list(qs)
 
     # Handle Export Formats
-    if export_format in ['csv', 'xls', 'xlsx']:
+    if export_format in ['csv', 'xls', 'xlsx', 'html']:
         if not user_list:
             return Response({'detail': 'No data found matching the selected filters.'}, status=404)
 
@@ -465,6 +809,9 @@ def admin_user_report(request):
 
         if export_format == 'csv':
             return _build_csv_response(filename, title, metadata_items, headers, rows)
+        elif export_format == 'html':
+            auto_print = request.GET.get('auto_print') in ['true', '1', True]
+            return _build_html_response(filename, title, metadata_items, headers, rows, auto_print=auto_print)
         else:
             return _build_excel_response(filename, title, metadata_items, headers, rows, sheet_title='User Report', file_ext=export_format)
 
@@ -549,7 +896,7 @@ def admin_room_report(request):
     room_list = list(qs)
 
     # Handle Export Formats
-    if export_format in ['csv', 'xls', 'xlsx']:
+    if export_format in ['csv', 'xls', 'xlsx', 'html']:
         if not room_list:
             return Response({'detail': 'No data found matching the selected filters.'}, status=404)
 
@@ -602,6 +949,9 @@ def admin_room_report(request):
 
         if export_format == 'csv':
             return _build_csv_response(filename, title, metadata_items, headers, rows)
+        elif export_format == 'html':
+            auto_print = request.GET.get('auto_print') in ['true', '1', True]
+            return _build_html_response(filename, title, metadata_items, headers, rows, auto_print=auto_print)
         else:
             return _build_excel_response(filename, title, metadata_items, headers, rows, sheet_title='Room Report', file_ext=export_format)
 

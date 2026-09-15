@@ -3,6 +3,7 @@ import * as s from './adminStyles';
 import {
   getReportFilterOptions,
   downloadReport,
+  openReportHtmlView,
 } from '../../api/admin';
 import ConfirmModal from '../../components/ConfirmModal';
 import SearchableSelect from '../../components/SearchableSelect';
@@ -13,6 +14,21 @@ const reportTypes = [
 ];
 
 // Standard SVG Icons (replacing emojis)
+const HtmlIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="16 18 22 12 16 6" />
+    <polyline points="8 6 2 12 8 18" />
+  </svg>
+);
+
+const PrintIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="6 9 6 2 18 2 18 9" />
+    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+    <rect x="6" y="14" width="12" height="8" />
+  </svg>
+);
+
 const DocumentIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -159,6 +175,43 @@ const AdminReports = () => {
         err.message || (isNotFound
           ? 'No records match the selected filters. Please adjust your filter criteria and try again.'
           : 'An unexpected error occurred while downloading the report. Please try again.'),
+        isNotFound ? 'info' : 'danger'
+      );
+    } finally {
+      setDownloadingFormat(null);
+    }
+  };
+
+  // Handle standard HTML view and direct print options
+  const handleHtmlAction = async (autoPrint = false) => {
+    // Validate mandatory date range on Room Report
+    if (reportType === 'room') {
+      if (!roomFilters.start_date || !roomFilters.end_date) {
+        showAlert('Date Range Required', 'Please select both From Date and To Date to generate the room report.', 'warning');
+        return;
+      }
+      if (roomFilters.start_date > roomFilters.end_date) {
+        showAlert('Invalid Date Range', 'From Date cannot be later than To Date. Please select a valid date range.', 'warning');
+        return;
+      }
+    }
+
+    const actionKey = autoPrint ? 'print' : 'html';
+    setDownloadingFormat(actionKey);
+    try {
+      const activeFilters = reportType === 'user' ? userFilters : roomFilters;
+      await openReportHtmlView({
+        type: reportType,
+        filters: activeFilters,
+        autoPrint,
+      });
+    } catch (err) {
+      const isNotFound = err.message?.toLowerCase().includes('no data') || err.status === 404;
+      showAlert(
+        isNotFound ? 'No Data Found' : 'Operation Failed',
+        err.message || (isNotFound
+          ? 'No records match the selected filters. Please adjust your filter criteria and try again.'
+          : 'An unexpected error occurred while generating the report. Please try again.'),
         isNotFound ? 'info' : 'danger'
       );
     } finally {
@@ -391,14 +444,60 @@ const AdminReports = () => {
         >
           <div>
             <div style={{ fontSize: '14px', fontWeight: '700', color: '#fff' }}>
-              Download Report
+              Report Actions
             </div>
             <div style={{ fontSize: '12px', color: s.colors.lightGray, marginTop: '2px' }}>
-              Exports all matching records. If no data matches, you will be notified.
+              View on screen, print, or download in your preferred format.
             </div>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* View HTML Button */}
+            <button
+              type="button"
+              onClick={() => handleHtmlAction(false)}
+              disabled={downloadingFormat !== null}
+              style={{
+                ...s.btn('default'),
+                background: '#1d2a3d',
+                color: '#5ec8e0',
+                border: '1px solid #2d4566',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '9px 18px',
+                fontWeight: 600,
+                opacity: downloadingFormat ? 0.7 : 1,
+              }}
+              title="Open interactive report view in browser"
+            >
+              <HtmlIcon />
+              {downloadingFormat === 'html' ? 'Generating...' : 'View HTML'}
+            </button>
+
+            {/* Print Button */}
+            <button
+              type="button"
+              onClick={() => handleHtmlAction(true)}
+              disabled={downloadingFormat !== null}
+              style={{
+                ...s.btn('default'),
+                background: '#282b3d',
+                color: '#e2e8f0',
+                border: '1px solid #424663',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '9px 18px',
+                fontWeight: 600,
+                opacity: downloadingFormat ? 0.7 : 1,
+              }}
+              title="Print report or save as PDF"
+            >
+              <PrintIcon />
+              {downloadingFormat === 'print' ? 'Preparing...' : 'Print'}
+            </button>
+
             {/* CSV Button */}
             <button
               onClick={() => handleDownload('csv')}
