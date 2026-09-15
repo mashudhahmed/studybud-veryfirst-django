@@ -13,6 +13,7 @@ const ConfirmModal = ({
   message,
   confirmLabel = 'OK',
   cancelLabel = 'Cancel',
+  showCancel = true,
   danger = false,
   loading = false,
   onConfirm,
@@ -21,7 +22,13 @@ const ConfirmModal = ({
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => {
-      if (e.key === 'Escape' && !loading) onCancel?.();
+      if (e.key === 'Escape' && !loading) {
+        if (showCancel) {
+          onCancel?.();
+        } else {
+          (onConfirm || onCancel)?.();
+        }
+      }
     };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
@@ -30,16 +37,26 @@ const ConfirmModal = ({
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, loading, onCancel]);
+  }, [open, loading, onCancel, onConfirm, showCancel]);
 
   if (!open) return null;
+
+  const handleDismiss = () => {
+    if (!loading) {
+      if (showCancel) {
+        onCancel?.();
+      } else {
+        (onConfirm || onCancel)?.();
+      }
+    }
+  };
 
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-modal-title"
-      onClick={() => !loading && onCancel?.()}
+      onClick={handleDismiss}
       style={{
         position: 'fixed',
         inset: 0,
@@ -94,23 +111,25 @@ const ConfirmModal = ({
             gap: 10,
           }}
         >
-          <button
-            type="button"
-            disabled={loading}
-            onClick={onCancel}
-            style={{
-              background: '#2a2b3d',
-              color: '#a8aabc',
-              border: '1px solid #40425a',
-              borderRadius: 9,
-              padding: '10px 18px',
-              fontWeight: 600,
-              fontSize: 14,
-              cursor: loading ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {cancelLabel}
-          </button>
+          {showCancel && cancelLabel && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={onCancel}
+              style={{
+                background: '#2a2b3d',
+                color: '#a8aabc',
+                border: '1px solid #40425a',
+                borderRadius: 9,
+                padding: '10px 18px',
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: loading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {cancelLabel}
+            </button>
+          )}
           <button
             type="button"
             disabled={loading}

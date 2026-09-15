@@ -4,7 +4,7 @@ import {
   getReportFilterOptions,
   downloadReport,
 } from '../../api/admin';
-import { useToast } from '../../context/ToastContext';
+import ConfirmModal from '../../components/ConfirmModal';
 import SearchableSelect from '../../components/SearchableSelect';
 
 const reportTypes = [
@@ -54,7 +54,12 @@ const RoomIcon = () => (
 );
 
 const AdminReports = () => {
-  const { showToast } = useToast();
+  // Modal state for user-facing alerts and completion dialogs
+  const [alertModal, setAlertModal] = useState(null);
+
+  const showAlert = (title, message, danger = false) => {
+    setAlertModal({ title, message, danger });
+  };
 
   // Active Report Tab: 'user' | 'room'
   const [reportType, setReportType] = useState('user');
@@ -92,13 +97,13 @@ const AdminReports = () => {
         const opts = await getReportFilterOptions();
         setFilterOptions(opts);
       } catch (err) {
-        showToast(err.message || 'Failed to load filter options', 'error');
+        showAlert('Error Loading Options', err.message || 'Failed to load filter options.', true);
       } finally {
         setOptionsLoading(false);
       }
     };
     fetchOptions();
-  }, [showToast]);
+  }, []);
 
   // Reset current report filters
   const handleReset = () => {
@@ -128,11 +133,11 @@ const AdminReports = () => {
     // Validate mandatory date range on Room Report
     if (reportType === 'room') {
       if (!roomFilters.start_date || !roomFilters.end_date) {
-        showToast('Please select both From Date and To Date.', 'error');
+        showAlert('Date Range Required', 'Please select both From Date and To Date to generate the room report.');
         return;
       }
       if (roomFilters.start_date > roomFilters.end_date) {
-        showToast('From Date cannot be later than To Date.', 'error');
+        showAlert('Invalid Date Range', 'From Date cannot be later than To Date. Please select a valid date range.');
         return;
       }
     }
@@ -145,11 +150,15 @@ const AdminReports = () => {
         format,
         filters: activeFilters,
       });
-      const typeLabel = reportType === 'user' ? 'User' : 'Room';
-      showToast(`${typeLabel} report successfully downloaded as .${format}`, 'success');
+      // On success, browser natively prompts/downloads the file without interrupting with a modal
     } catch (err) {
       // Handles 404 "No data found matching the selected filters."
-      showToast(err.message || 'No data found matching the selected filters.', 'error');
+      const isNotFound = err.message?.toLowerCase().includes('no data') || err.status === 404;
+      showAlert(
+        isNotFound ? 'No Data Found' : 'Download Failed',
+        err.message || 'No data found matching the selected filters. Please adjust your filter criteria and try again.',
+        !isNotFound
+      );
     } finally {
       setDownloadingFormat(null);
     }
@@ -468,6 +477,18 @@ const AdminReports = () => {
           </div>
         </div>
       </div>
+
+      {/* Alert / Notice Modal */}
+      <ConfirmModal
+        open={!!alertModal}
+        title={alertModal?.title || 'Notice'}
+        message={alertModal?.message}
+        confirmLabel="OK"
+        showCancel={false}
+        danger={!!alertModal?.danger}
+        onConfirm={() => setAlertModal(null)}
+        onCancel={() => setAlertModal(null)}
+      />
     </div>
   );
 };
