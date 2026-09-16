@@ -535,15 +535,16 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
             letter-spacing: 0.5px;
         }}
         .meta-content {{
-            padding: 14px 48px;
+            padding: 14px 24px;
             display: flex;
             flex-direction: column;
+            align-items: center;
             gap: 10px;
         }}
         .meta-row {{
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 40px;
+            grid-template-columns: 280px 280px;
+            gap: 48px;
             font-size: 13px;
         }}
         .meta-field {{
@@ -554,7 +555,7 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
         .meta-label {{
             font-weight: 700;
             color: #475569;
-            min-width: 120px;
+            min-width: 110px;
         }}
         .meta-val {{
             color: #1e293b;
@@ -644,12 +645,17 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
                 font-size: 9pt !important;
             }}
             .meta-content {{
-                padding: 10px 24px !important;
+                padding: 10px 16px !important;
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: center !important;
                 gap: 6px !important;
             }}
             .meta-row {{
                 font-size: 8.5pt !important;
-                gap: 20px !important;
+                display: grid !important;
+                grid-template-columns: 210pt 210pt !important;
+                gap: 32pt !important;
             }}
             .meta-footer-bar {{
                 padding: 5px 12px !important;
@@ -905,7 +911,7 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows, orientat
 
     clean_meta = [item for item in metadata_items if item[0] != "Total Records"]
     meta_table_data = [
-        [Paragraph("REPORT DETAILS &amp; FILTER CRITERIA", meta_header_style), ""]
+        [Paragraph("REPORT DETAILS &amp; FILTER CRITERIA", meta_header_style), "", "", ""]
     ]
 
     for i in range(0, len(clean_meta), 2):
@@ -917,7 +923,7 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows, orientat
             right_cell = Paragraph(f"<b>{html.escape(item2[0])}:</b> &nbsp; {html.escape(str(item2[1]))}", meta_val_style)
         else:
             right_cell = Paragraph("", meta_val_style)
-        meta_table_data.append([left_cell, right_cell])
+        meta_table_data.append(["", left_cell, right_cell, ""])
 
     summary_style = ParagraphStyle(
         'MetaSummary',
@@ -929,24 +935,34 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows, orientat
         textColor=colors.HexColor('#1E293B'),
     )
     meta_table_data.append([
-        Paragraph(f"TOTAL RECORDS MATCHING CRITERIA: {len(rows)}", summary_style), ""
+        Paragraph(f"TOTAL RECORDS MATCHING CRITERIA: {len(rows)}", summary_style), "", "", ""
     ])
 
-    half_w = printable_width / 2.0
-    meta_table = Table(meta_table_data, colWidths=[half_w, half_w])
+    if is_landscape:
+        item_w = 260.0
+    else:
+        item_w = 200.0
+
+    margin_w = max(10.0, (printable_width - (item_w * 2.0)) / 2.0)
+    actual_item_w = (printable_width - (margin_w * 2.0)) / 2.0
+
+    meta_table = Table(meta_table_data, colWidths=[margin_w, actual_item_w, actual_item_w, margin_w])
     meta_table.setStyle(TableStyle([
-        ('SPAN', (0, 0), (1, 0)),
-        ('BACKGROUND', (0, 0), (1, 0), colors.HexColor('#F1F5F9')),
-        ('SPAN', (0, -1), (1, -1)),
-        ('BACKGROUND', (0, -1), (1, -1), colors.HexColor('#F1F5F9')),
+        ('SPAN', (0, 0), (3, 0)),
+        ('BACKGROUND', (0, 0), (3, 0), colors.HexColor('#F1F5F9')),
+        ('SPAN', (0, -1), (3, -1)),
+        ('BACKGROUND', (0, -1), (3, -1), colors.HexColor('#F1F5F9')),
         ('BACKGROUND', (0, 1), (-1, -2), colors.HexColor('#F8FAFC')),
         ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#CBD5E1')),
         ('LINEBELOW', (0, 0), (-1, 0), 0.75, colors.HexColor('#CBD5E1')),
         ('LINEABOVE', (0, -1), (-1, -1), 0.75, colors.HexColor('#CBD5E1')),
         ('TOPPADDING', (0, 0), (-1, -1), 2.5),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
-        ('LEFTPADDING', (0, 0), (-1, -1), 10),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('LEFTPADDING', (1, 1), (1, -2), 8),
+        ('LEFTPADDING', (2, 1), (2, -2), 16),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
     ]))
     elements.append(meta_table)
     elements.append(Spacer(1, 10))

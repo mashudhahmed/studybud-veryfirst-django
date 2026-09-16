@@ -141,6 +141,9 @@ const AdminReports = () => {
   const [orientationModal, setOrientationModal] = useState(null); // { measuredWidth: number }
   const [tier3Modal, setTier3Modal] = useState(null); // { measuredWidth: number }
 
+  // Temporary layout simulation selector for testing Tier 2 and Tier 3 modals
+  const [simulationTier, setSimulationTier] = useState('auto'); // 'auto' | 'tier2' | 'tier3'
+
   // Load dropdown options on mount
   useEffect(() => {
     const fetchOptions = async () => {
@@ -197,6 +200,20 @@ const AdminReports = () => {
 
     // Multi-tier adaptive layout checking for PDF downloads without explicit orientation override
     if (format === 'pdf' && !orientationOverride) {
+      // Direct Simulation Mode intercepts for rapid testing
+      if (simulationTier === 'tier2') {
+        setOrientationModal({
+          measuredWidth: 648.5,
+        });
+        return;
+      }
+      if (simulationTier === 'tier3') {
+        setTier3Modal({
+          measuredWidth: 892.0,
+        });
+        return;
+      }
+
       setDownloadingFormat('pdf');
       try {
         const fitInfo = await checkReportPdfFit({
@@ -681,6 +698,55 @@ const AdminReports = () => {
               <ResetIcon />
               Reset
             </button>
+
+            {/* Layout Test Mode Selector (Temporary Testing Tool) */}
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginLeft: 'auto',
+                background: '#1d2030',
+                border: '1px dashed #475569',
+                borderRadius: '8px',
+                padding: '4px 10px',
+              }}
+            >
+              <label
+                htmlFor="layout-test-mode"
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: simulationTier === 'auto' ? '#94a3b8' : '#5ec8e0',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Test Mode:
+              </label>
+              <select
+                id="layout-test-mode"
+                value={simulationTier}
+                onChange={(e) => setSimulationTier(e.target.value)}
+                style={{
+                  background: '#232435',
+                  color: simulationTier === 'auto' ? '#cbd5e1' : '#5ec8e0',
+                  border: `1px solid ${simulationTier === 'auto' ? '#40425a' : '#5ec8e0'}`,
+                  borderRadius: '6px',
+                  padding: '5px 8px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+                title="Temporary layout test selector - switch to test Tier 2 or Tier 3 modals"
+              >
+                <option value="auto">Live Data (Auto / Tier 1)</option>
+                <option value="tier2">Simulate Tier 2 (Wide ~648 pt)</option>
+                <option value="tier3">Simulate Tier 3 (Ultra-Wide ~892 pt)</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
