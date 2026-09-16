@@ -49,6 +49,14 @@ const SpreadsheetIcon = () => (
   </svg>
 );
 
+const PdfIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <path d="M9 15v-4h2a1.5 1.5 0 0 1 0 3H9" />
+  </svg>
+);
+
 const ResetIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="1 4 1 10 7 10" />
@@ -557,6 +565,27 @@ const AdminReports = () => {
             >
               <SpreadsheetIcon />
               {downloadingFormat === 'xlsx' ? 'Downloading...' : 'Download XLSX'}
+            </button>
+
+            {/* PDF Button */}
+            <button
+              onClick={() => handleDownload('pdf')}
+              disabled={downloadingFormat !== null}
+              style={{
+                ...s.btn('default'),
+                background: '#451a1a',
+                color: '#fca5a5',
+                border: '1px solid #7f1d1d',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '9px 18px',
+                opacity: downloadingFormat ? 0.7 : 1,
+              }}
+              title="Download vector PDF document"
+            >
+              <PdfIcon />
+              {downloadingFormat === 'pdf' ? 'Generating...' : 'Download PDF'}
             </button>
 
             {/* Reset Button */}

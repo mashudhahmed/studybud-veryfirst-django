@@ -108,7 +108,7 @@ studybud/
 - **User Profiles**: Manage bio, avatar images, and view user participant history.
 - **Administrative Panel**: Role-based access control for managing rooms, topics, and user accounts.
 - **Executive Reports and Data Export**: Dedicated administrative export center for generating custom User and Room activity reports:
-  - **Export & View Formats**: Interactive HTML view, direct Print / PDF generation, and exports in CSV, XLS, and XLSX.
+  - **Export & View Formats**: Interactive HTML view, direct browser Print, vector PDF export (`reportlab`), and spreadsheet exports in CSV, XLS, and XLSX.
   - **Branded Presentation**: Centered brand logo, full-width executive metadata card, and center-aligned numeric/status data tables.
   - **Granular Filtering**: Filter by topic, creator, participant, role, or date ranges with validation modal alerts.
 
@@ -119,8 +119,8 @@ studybud/
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
 | `/api/admin/reports/options/` | `GET` | Dynamic dropdown metadata (users, topics, roles) |
-| `/api/admin/reports/users/` | `GET` | User activity report (`?export=html\|csv\|xls\|xlsx&auto_print=1`) |
-| `/api/admin/reports/rooms/` | `GET` | Room activity report (`?export=html\|csv\|xls\|xlsx&auto_print=1`) |
+| `/api/admin/reports/users/` | `GET` | User activity report (`?export=html\|pdf\|csv\|xls\|xlsx&auto_print=1`) |
+| `/api/admin/reports/rooms/` | `GET` | Room activity report (`?export=html\|pdf\|csv\|xls\|xlsx&auto_print=1`) |
 
 ---
 

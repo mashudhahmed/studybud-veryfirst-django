@@ -122,4 +122,24 @@ class ReportApiTests(TestCase):
         self.assertIn('size: auto', content)
         self.assertIn('table-header-group', content)
 
+    def test_user_report_pdf_export(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.get('/api/admin/reports/users/?export=pdf')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'application/pdf')
+        self.assertIn('.pdf', res['Content-Disposition'])
+        self.assertTrue(res.content.startswith(b'%PDF-'))
+
+    def test_room_report_pdf_export(self):
+        self.client.force_authenticate(user=self.admin_user)
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        tomorrow = today + timedelta(days=1)
+        res = self.client.get(f'/api/admin/reports/rooms/?export=pdf&start_date={yesterday}&end_date={tomorrow}')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'application/pdf')
+        self.assertIn('.pdf', res['Content-Disposition'])
+        self.assertTrue(res.content.startswith(b'%PDF-'))
+
+
 

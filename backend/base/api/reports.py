@@ -21,6 +21,14 @@ from openpyxl.drawing.image import Image as OpenpyxlImage
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor
 from openpyxl.utils.units import pixels_to_EMU
 
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as ReportLabImage
+)
+from reportlab.pdfgen import canvas
+
 from base.models import Room, Topic, Message
 
 
@@ -733,6 +741,249 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
     return HttpResponse(html_content, content_type='text/html; charset=utf-8')
 
 
+class NumberedCanvas(canvas.Canvas):
+    """
+    Two-pass canvas to dynamically compute and draw 'Page X of Y' 
+    and a corporate footer across multi-page PDF documents.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        num_pages = len(self._saved_page_states)
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self.draw_page_decorations(num_pages)
+            super().showPage()
+        super().save()
+
+    def draw_page_decorations(self, total_pages):
+        self.saveState()
+        self.setFont("Helvetica", 8)
+        self.setFillColor(colors.HexColor("#64748B"))
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        footer_text = f"Generated on {now_str} — StudyBud Administration"
+        page_text = f"Page {self._pageNumber} of {total_pages}"
+        self.drawString(34, 20, footer_text)
+        self.drawRightString(841.89 - 34, 20, page_text)
+        self.restoreState()
+
+
+def _build_pdf_response(filename, title, metadata_items, headers, rows):
+    """
+    Builds an enterprise vector PDF document using ReportLab.
+    Landscape A4 with logo branding, centered title, metadata card,
+    multi-page repeating headers, alternating row colors, and two-pass footer.
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=34,
+        rightMargin=34,
+        topMargin=26,
+        bottomMargin=36,
+    )
+
+    printable_width = 841.89 - 68  # 773.89 pt
+    elements = []
+    styles = getSampleStyleSheet()
+
+    # 1. Centered Logo
+    logo_path = _get_logo_path()
+    if logo_path and os.path.exists(logo_path):
+        try:
+            # Aspect ratio 46x42 -> 44x40 pt
+            logo_img = ReportLabImage(logo_path, width=44, height=40)
+            logo_img.hAlign = 'CENTER'
+            elements.append(logo_img)
+            elements.append(Spacer(1, 6))
+        except Exception:
+            pass
+
+    # 2. Centered Report Title
+    title_style = ParagraphStyle(
+        'ReportTitle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=14,
+        leading=17,
+        alignment=1,  # Center
+        textColor=colors.HexColor('#1E293B'),
+    )
+    elements.append(Paragraph(f"STUDYBUD — {html.escape(title.upper())}", title_style))
+    elements.append(Spacer(1, 12))
+
+    # 3. Metadata Card (Matching HTML & Excel format)
+    meta_header_style = ParagraphStyle(
+        'MetaHeader',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=8.5,
+        leading=11,
+        alignment=1,  # Center
+        textColor=colors.HexColor('#475569'),
+    )
+    meta_val_style = ParagraphStyle(
+        'MetaVal',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=8,
+        leading=11,
+        textColor=colors.HexColor('#1E293B'),
+    )
+
+    clean_meta = [item for item in metadata_items if item[0] != "Total Records"]
+    meta_table_data = [
+        [Paragraph("REPORT DETAILS &amp; FILTER CRITERIA", meta_header_style), ""]
+    ]
+
+    for i in range(0, len(clean_meta), 2):
+        item1 = clean_meta[i]
+        item2 = clean_meta[i + 1] if (i + 1) < len(clean_meta) else None
+
+        left_cell = Paragraph(f"<b>{html.escape(item1[0])}:</b> &nbsp; {html.escape(str(item1[1]))}", meta_val_style)
+        if item2:
+            right_cell = Paragraph(f"<b>{html.escape(item2[0])}:</b> &nbsp; {html.escape(str(item2[1]))}", meta_val_style)
+        else:
+            right_cell = Paragraph("", meta_val_style)
+        meta_table_data.append([left_cell, right_cell])
+
+    summary_style = ParagraphStyle(
+        'MetaSummary',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=8.5,
+        leading=11,
+        alignment=1,  # Center
+        textColor=colors.HexColor('#1E293B'),
+    )
+    meta_table_data.append([
+        Paragraph(f"TOTAL RECORDS MATCHING CRITERIA: {len(rows)}", summary_style), ""
+    ])
+
+    half_w = printable_width / 2.0
+    meta_table = Table(meta_table_data, colWidths=[half_w, half_w])
+    meta_table.setStyle(TableStyle([
+        ('SPAN', (0, 0), (1, 0)),
+        ('BACKGROUND', (0, 0), (1, 0), colors.HexColor('#F1F5F9')),
+        ('SPAN', (0, -1), (1, -1)),
+        ('BACKGROUND', (0, -1), (1, -1), colors.HexColor('#F1F5F9')),
+        ('BACKGROUND', (0, 1), (-1, -2), colors.HexColor('#F8FAFC')),
+        ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#CBD5E1')),
+        ('LINEBELOW', (0, 0), (-1, 0), 0.75, colors.HexColor('#CBD5E1')),
+        ('LINEABOVE', (0, -1), (-1, -1), 0.75, colors.HexColor('#CBD5E1')),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 14),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 14),
+    ]))
+    elements.append(meta_table)
+    elements.append(Spacer(1, 12))
+
+    # 4. Data Table
+    th_style = ParagraphStyle(
+        'TableHeader',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=7.5,
+        leading=9.5,
+        alignment=1,  # Center
+        textColor=colors.HexColor('#FFFFFF'),
+    )
+    td_style_left = ParagraphStyle(
+        'TableCellLeft',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=7,
+        leading=9,
+        textColor=colors.HexColor('#334155'),
+    )
+    td_style_center = ParagraphStyle(
+        'TableCellCenter',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=7,
+        leading=9,
+        alignment=1,  # Center
+        textColor=colors.HexColor('#334155'),
+    )
+
+    center_headers = {'id', 'room id', 'status', 'date joined', 'last login', 'created at', 'date created',
+                      'updated at', 'last updated', 'rooms hosted', 'rooms joined', 'messages sent',
+                      'participants count', 'messages count'}
+
+    table_data = []
+    hdr_cells = [Paragraph(html.escape(str(h)), th_style) for h in headers]
+    table_data.append(hdr_cells)
+
+    for r in rows:
+        row_cells = []
+        for c_idx, val in enumerate(r):
+            h_name = str(headers[c_idx]).strip().lower()
+            val_str = html.escape(str(val)) if val is not None else ''
+            style = td_style_center if h_name in center_headers else td_style_left
+            row_cells.append(Paragraph(val_str, style))
+        table_data.append(row_cells)
+
+    # Proportional column weights
+    weights = []
+    for h in headers:
+        h_lower = str(h).strip().lower()
+        if h_lower in ['id', 'room id']:
+            weights.append(0.5)
+        elif h_lower in ['status', 'role']:
+            weights.append(0.8)
+        elif 'count' in h_lower or 'rooms' in h_lower or 'messages' in h_lower:
+            weights.append(0.85)
+        elif 'date' in h_lower or 'login' in h_lower or 'created' in h_lower or 'updated' in h_lower:
+            weights.append(1.05)
+        elif h_lower in ['username', 'host', 'creator (host)', 'topic']:
+            weights.append(1.2)
+        elif h_lower in ['email', 'room name', 'participants list']:
+            weights.append(1.8)
+        else:
+            weights.append(1.0)
+
+    total_weight = sum(weights)
+    col_widths = [(w / total_weight) * printable_width for w in weights]
+
+    report_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    
+    table_style_commands = [
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2C3E50')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#FFFFFF')),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#CBD5E1')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 3),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+    ]
+
+    for r_idx in range(1, len(table_data)):
+        if r_idx % 2 == 0:
+            table_style_commands.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor('#F8FAFC')))
+        else:
+            table_style_commands.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor('#FFFFFF')))
+
+    report_table.setStyle(TableStyle(table_style_commands))
+    elements.append(report_table)
+
+    doc.build(elements, canvasmaker=NumberedCanvas)
+
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}.pdf"'
+    return response
+
+
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def admin_report_filter_options(request):
@@ -818,7 +1069,7 @@ def admin_user_report(request):
     user_list = list(qs)
 
     # Handle Export Formats
-    if export_format in ['csv', 'xls', 'xlsx', 'html']:
+    if export_format in ['csv', 'xls', 'xlsx', 'html', 'pdf']:
         if not user_list:
             return Response({'detail': 'No data found matching the selected filters.'}, status=404)
 
@@ -873,6 +1124,8 @@ def admin_user_report(request):
         elif export_format == 'html':
             auto_print = request.GET.get('auto_print') in ['true', '1', True]
             return _build_html_response(filename, title, metadata_items, headers, rows, auto_print=auto_print)
+        elif export_format == 'pdf':
+            return _build_pdf_response(filename, title, metadata_items, headers, rows)
         else:
             return _build_excel_response(filename, title, metadata_items, headers, rows, sheet_title='User Report', file_ext=export_format)
 
@@ -957,7 +1210,7 @@ def admin_room_report(request):
     room_list = list(qs)
 
     # Handle Export Formats
-    if export_format in ['csv', 'xls', 'xlsx', 'html']:
+    if export_format in ['csv', 'xls', 'xlsx', 'html', 'pdf']:
         if not room_list:
             return Response({'detail': 'No data found matching the selected filters.'}, status=404)
 
@@ -1013,6 +1266,8 @@ def admin_room_report(request):
         elif export_format == 'html':
             auto_print = request.GET.get('auto_print') in ['true', '1', True]
             return _build_html_response(filename, title, metadata_items, headers, rows, auto_print=auto_print)
+        elif export_format == 'pdf':
+            return _build_pdf_response(filename, title, metadata_items, headers, rows)
         else:
             return _build_excel_response(filename, title, metadata_items, headers, rows, sheet_title='Room Report', file_ext=export_format)
 
