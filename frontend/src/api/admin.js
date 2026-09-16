@@ -187,10 +187,13 @@ export const getRoomReport = async ({ topic_id, creator_id, participant_id, star
   }
 };
 
-export const downloadReport = async ({ type, format = 'csv', filters = {} }) => {
+export const downloadReport = async ({ type, format = 'csv', filters = {}, orientation = null }) => {
   try {
     const params = new URLSearchParams();
     params.append('export', format);
+    if (orientation) {
+      params.append('orientation', orientation);
+    }
 
     Object.entries(filters).forEach(([key, val]) => {
       if (val !== undefined && val !== null && val !== '' && val !== 'all') {
@@ -222,6 +225,13 @@ export const downloadReport = async ({ type, format = 'csv', filters = {} }) => 
     link.click();
     link.remove();
     window.URL.revokeObjectURL(downloadUrl);
+
+    return {
+      filename,
+      orientation: response.headers['x-report-orientation'],
+      tier: response.headers['x-report-tier'],
+      measuredWidth: response.headers['x-report-measured-width'],
+    };
   } catch (error) {
     if (error.response?.data instanceof Blob) {
       try {
@@ -237,6 +247,28 @@ export const downloadReport = async ({ type, format = 'csv', filters = {} }) => 
       }
     }
     throw new Error(extractErrorMessage(error, 'No data found matching the selected filters.'));
+  }
+};
+
+export const checkReportPdfFit = async ({ type, filters = {} }) => {
+  try {
+    const params = new URLSearchParams();
+    params.append('check_fit', '1');
+
+    Object.entries(filters).forEach(([key, val]) => {
+      if (val !== undefined && val !== null && val !== '' && val !== 'all') {
+        params.append(key, val);
+      }
+    });
+
+    const endpoint = type === 'user' ? '/admin/reports/users/' : '/admin/reports/rooms/';
+    const response = await client.get(`${endpoint}?${params.toString()}`);
+    return response.data;
+  } catch (error) {
+    if (error.response?.data?.detail) {
+      throw new Error(error.response.data.detail);
+    }
+    throw new Error(extractErrorMessage(error, 'Failed to inspect report layout.'));
   }
 };
 

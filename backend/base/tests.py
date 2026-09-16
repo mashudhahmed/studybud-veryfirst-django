@@ -129,6 +129,25 @@ class ReportApiTests(TestCase):
         self.assertEqual(res['Content-Type'], 'application/pdf')
         self.assertIn('.pdf', res['Content-Disposition'])
         self.assertTrue(res.content.startswith(b'%PDF-'))
+        self.assertEqual(res['X-Report-Tier'], 'tier1')
+        self.assertEqual(res['X-Report-Orientation'], 'portrait')
+        self.assertTrue(float(res['X-Report-Measured-Width']) > 0)
+
+    def test_user_report_pdf_landscape_override(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.get('/api/admin/reports/users/?export=pdf&orientation=landscape')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'application/pdf')
+        self.assertEqual(res['X-Report-Orientation'], 'landscape')
+
+    def test_user_report_check_fit(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.get('/api/admin/reports/users/?check_fit=1')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['tier'], 'tier1')
+        self.assertEqual(res.data['recommended'], 'portrait')
+        self.assertTrue(res.data['measured_width'] > 0)
+        self.assertGreaterEqual(res.data['total_records'], 2)
 
     def test_room_report_pdf_export(self):
         self.client.force_authenticate(user=self.admin_user)
@@ -140,6 +159,28 @@ class ReportApiTests(TestCase):
         self.assertEqual(res['Content-Type'], 'application/pdf')
         self.assertIn('.pdf', res['Content-Disposition'])
         self.assertTrue(res.content.startswith(b'%PDF-'))
+        self.assertEqual(res['X-Report-Tier'], 'tier1')
+        self.assertEqual(res['X-Report-Orientation'], 'portrait')
+        self.assertTrue(float(res['X-Report-Measured-Width']) > 0)
+
+    def test_room_report_check_fit(self):
+        self.client.force_authenticate(user=self.admin_user)
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        tomorrow = today + timedelta(days=1)
+        res = self.client.get(f'/api/admin/reports/rooms/?check_fit=1&start_date={yesterday}&end_date={tomorrow}')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['tier'], 'tier1')
+        self.assertEqual(res.data['recommended'], 'portrait')
+        self.assertTrue(res.data['measured_width'] > 0)
+        self.assertGreaterEqual(res.data['total_records'], 1)
+
+    def test_room_report_check_fit_date_range_mandatory(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.get('/api/admin/reports/rooms/?check_fit=1')
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('detail', res.data)
+
 
 
 

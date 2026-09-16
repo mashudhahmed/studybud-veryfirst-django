@@ -28,6 +28,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as ReportLabImage
 )
 from reportlab.pdfgen import canvas
+from reportlab.pdfbase.pdfmetrics import stringWidth
 
 from base.models import Room, Topic, Message
 
@@ -741,10 +742,33 @@ def _build_html_response(filename, title, metadata_items, headers, rows, auto_pr
     return HttpResponse(html_content, content_type='text/html; charset=utf-8')
 
 
+def _measure_table_content_width(headers, rows, font_name='Helvetica', min_font_size=6.5, padding=6.0):
+    """
+    Measures the physical width in points required by the content in each column
+    at the minimum legible font floor (6.5pt).
+    Returns total required width in points.
+    """
+    col_widths = []
+    for c_idx, h in enumerate(headers):
+        # Measure header token
+        max_token_w = stringWidth(str(h), font_name, min_font_size)
+        # Measure row tokens (individual words to allow multi-line wrapping)
+        for r in rows:
+            if c_idx < len(r) and r[c_idx] is not None:
+                val_str = str(r[c_idx])
+                for word in val_str.split():
+                    w = stringWidth(word, font_name, min_font_size)
+                    if w > max_token_w:
+                        max_token_w = w
+        col_widths.append(max(24.0, max_token_w + padding))
+    return sum(col_widths)
+
+
 class NumberedCanvas(canvas.Canvas):
     """
     Two-pass canvas to dynamically compute and draw 'Page X of Y' 
     and a corporate footer across multi-page PDF documents.
+    Adapts dynamically to both Portrait (595.27 pt) and Landscape (841.89 pt).
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -764,33 +788,73 @@ class NumberedCanvas(canvas.Canvas):
 
     def draw_page_decorations(self, total_pages):
         self.saveState()
-        self.setFont("Helvetica", 8)
+        self.setFont("Helvetica", 7.5)
         self.setFillColor(colors.HexColor("#64748B"))
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         footer_text = f"Generated on {now_str} — StudyBud Administration"
         page_text = f"Page {self._pageNumber} of {total_pages}"
-        self.drawString(34, 20, footer_text)
-        self.drawRightString(841.89 - 34, 20, page_text)
+        page_width = self._pagesize[0]
+        self.drawString(24, 16, footer_text)
+        self.drawRightString(page_width - 24, 16, page_text)
         self.restoreState()
 
 
-def _build_pdf_response(filename, title, metadata_items, headers, rows):
+def _build_pdf_response(filename, title, metadata_items, headers, rows, orientation=None):
     """
     Builds an enterprise vector PDF document using ReportLab.
-    Landscape A4 with logo branding, centered title, metadata card,
-    multi-page repeating headers, alternating row colors, and two-pass footer.
+    Dynamically scales font from 11.0pt down to a strict 6.5pt floor.
+    Uses content-based measurement to determine optimal orientation (Portrait vs Landscape),
+    while honoring explicit orientation overrides.
     """
+    num_cols = len(headers)
+    measured_width = _measure_table_content_width(headers, rows)
+
+    PORTRAIT_LIMIT = 547.27   # 595.27 - 48
+    LANDSCAPE_LIMIT = 773.89  # 841.89 - 68
+
+    # Determine Tier based on content measurement
+    if measured_width <= PORTRAIT_LIMIT:
+        tier = 'tier1'  # Optimal for Portrait
+    elif measured_width <= LANDSCAPE_LIMIT:
+        tier = 'tier2'  # Wide, optimal for Landscape
+    else:
+        tier = 'tier3'  # Ultra-wide, exceeds paper limits
+
+    # Determine Orientation
+    explicit_orientation = (orientation or '').strip().lower()
+    if explicit_orientation in ['portrait', 'landscape']:
+        chosen_orientation = explicit_orientation
+    else:
+        # Default decision tree: Tier 1 -> Portrait, Tier 2 / Tier 3 -> Landscape
+        chosen_orientation = 'portrait' if tier == 'tier1' else 'landscape'
+
+    is_landscape = (chosen_orientation == 'landscape')
+
     buffer = io.BytesIO()
+    if is_landscape:
+        page_size = landscape(A4)
+        left_margin = 34
+        right_margin = 34
+        top_margin = 26
+        bottom_margin = 34
+        printable_width = 841.89 - (left_margin + right_margin)
+    else:
+        page_size = A4
+        left_margin = 24
+        right_margin = 24
+        top_margin = 24
+        bottom_margin = 32
+        printable_width = 595.27 - (left_margin + right_margin)
+
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=landscape(A4),
-        leftMargin=34,
-        rightMargin=34,
-        topMargin=26,
-        bottomMargin=36,
+        pagesize=page_size,
+        leftMargin=left_margin,
+        rightMargin=right_margin,
+        topMargin=top_margin,
+        bottomMargin=bottom_margin,
     )
 
-    printable_width = 841.89 - 68  # 773.89 pt
     elements = []
     styles = getSampleStyleSheet()
 
@@ -798,34 +862,35 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows):
     logo_path = _get_logo_path()
     if logo_path and os.path.exists(logo_path):
         try:
-            # Aspect ratio 46x42 -> 44x40 pt
-            logo_img = ReportLabImage(logo_path, width=44, height=40)
+            # Aspect ratio 46x42 -> 40x36 pt
+            logo_img = ReportLabImage(logo_path, width=40, height=36)
             logo_img.hAlign = 'CENTER'
             elements.append(logo_img)
-            elements.append(Spacer(1, 6))
+            elements.append(Spacer(1, 5))
         except Exception:
             pass
 
     # 2. Centered Report Title
+    title_font_size = 14 if is_landscape else 13
     title_style = ParagraphStyle(
         'ReportTitle',
         parent=styles['Normal'],
         fontName='Helvetica-Bold',
-        fontSize=14,
-        leading=17,
+        fontSize=title_font_size,
+        leading=title_font_size + 3,
         alignment=1,  # Center
         textColor=colors.HexColor('#1E293B'),
     )
     elements.append(Paragraph(f"STUDYBUD — {html.escape(title.upper())}", title_style))
-    elements.append(Spacer(1, 12))
+    elements.append(Spacer(1, 10))
 
     # 3. Metadata Card (Matching HTML & Excel format)
     meta_header_style = ParagraphStyle(
         'MetaHeader',
         parent=styles['Normal'],
         fontName='Helvetica-Bold',
-        fontSize=8.5,
-        leading=11,
+        fontSize=8,
+        leading=10,
         alignment=1,  # Center
         textColor=colors.HexColor('#475569'),
     )
@@ -833,8 +898,8 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows):
         'MetaVal',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=8,
-        leading=11,
+        fontSize=7.5,
+        leading=10,
         textColor=colors.HexColor('#1E293B'),
     )
 
@@ -858,8 +923,8 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows):
         'MetaSummary',
         parent=styles['Normal'],
         fontName='Helvetica-Bold',
-        fontSize=8.5,
-        leading=11,
+        fontSize=8,
+        leading=10,
         alignment=1,  # Center
         textColor=colors.HexColor('#1E293B'),
     )
@@ -878,21 +943,27 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows):
         ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#CBD5E1')),
         ('LINEBELOW', (0, 0), (-1, 0), 0.75, colors.HexColor('#CBD5E1')),
         ('LINEABOVE', (0, -1), (-1, -1), 0.75, colors.HexColor('#CBD5E1')),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('LEFTPADDING', (0, 0), (-1, -1), 14),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 14),
+        ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
     ]))
     elements.append(meta_table)
-    elements.append(Spacer(1, 12))
+    elements.append(Spacer(1, 10))
 
-    # 4. Data Table
+    # 4. Dynamic Font & Padding Scaling (from 11.0pt down to 6.5pt floor)
+    td_font_size = max(6.5, min(11.0, 11.0 - (num_cols - 3) * 0.55))
+    th_font_size = td_font_size + 0.5
+    leading = td_font_size + 1.5
+    h_padding = max(1.8, min(3.5, 4.0 - (num_cols - 3) * 0.25))
+    v_padding = max(2.0, min(4.0, 4.5 - (num_cols - 3) * 0.25))
+
     th_style = ParagraphStyle(
         'TableHeader',
         parent=styles['Normal'],
         fontName='Helvetica-Bold',
-        fontSize=7.5,
-        leading=9.5,
+        fontSize=th_font_size,
+        leading=leading,
         alignment=1,  # Center
         textColor=colors.HexColor('#FFFFFF'),
     )
@@ -900,16 +971,16 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows):
         'TableCellLeft',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=7,
-        leading=9,
+        fontSize=td_font_size,
+        leading=leading,
         textColor=colors.HexColor('#334155'),
     )
     td_style_center = ParagraphStyle(
         'TableCellCenter',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=7,
-        leading=9,
+        fontSize=td_font_size,
+        leading=leading,
         alignment=1,  # Center
         textColor=colors.HexColor('#334155'),
     )
@@ -938,15 +1009,15 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows):
         if h_lower in ['id', 'room id']:
             weights.append(0.5)
         elif h_lower in ['status', 'role']:
-            weights.append(0.8)
+            weights.append(0.75)
         elif 'count' in h_lower or 'rooms' in h_lower or 'messages' in h_lower:
-            weights.append(0.85)
+            weights.append(0.8)
         elif 'date' in h_lower or 'login' in h_lower or 'created' in h_lower or 'updated' in h_lower:
-            weights.append(1.05)
+            weights.append(1.0)
         elif h_lower in ['username', 'host', 'creator (host)', 'topic']:
-            weights.append(1.2)
+            weights.append(1.15)
         elif h_lower in ['email', 'room name', 'participants list']:
-            weights.append(1.8)
+            weights.append(1.7)
         else:
             weights.append(1.0)
 
@@ -962,10 +1033,10 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows):
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor('#CBD5E1')),
         ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('LEFTPADDING', (0, 0), (-1, -1), 3),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), v_padding),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), v_padding),
+        ('LEFTPADDING', (0, 0), (-1, -1), h_padding),
+        ('RIGHTPADDING', (0, 0), (-1, -1), h_padding),
     ]
 
     for r_idx in range(1, len(table_data)):
@@ -981,6 +1052,9 @@ def _build_pdf_response(filename, title, metadata_items, headers, rows):
 
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}.pdf"'
+    response['X-Report-Orientation'] = chosen_orientation
+    response['X-Report-Tier'] = tier
+    response['X-Report-Measured-Width'] = str(round(measured_width, 1))
     return response
 
 
@@ -1027,6 +1101,8 @@ def admin_user_report(request):
     user_id = request.GET.get('user_id')
     search = request.GET.get('search', '').strip()
     export_format = (request.GET.get('export') or request.GET.get('file_format') or '').lower()
+    orientation = request.GET.get('orientation')
+    check_fit = request.GET.get('check_fit') in ['1', 'true', True]
 
     qs = (
         User.objects.all()
@@ -1067,6 +1143,63 @@ def admin_user_report(request):
         qs = qs.filter(Q(username__icontains=search) | Q(email__icontains=search))
 
     user_list = list(qs)
+
+    # Content-based fit inspection for adaptive multi-tier PDF generation
+    if check_fit:
+        if not user_list:
+            return Response({'detail': 'No data found matching the selected filters.'}, status=404)
+
+        headers = [
+            'ID',
+            'Username',
+            'Email',
+            'Role',
+            'Status',
+            'Date Joined',
+            'Last Login',
+            'Rooms Hosted',
+            'Rooms Joined',
+            'Messages Sent',
+        ]
+        rows = []
+        for u in user_list:
+            r_label = 'Superuser' if u.is_superuser else ('Staff' if u.is_staff else 'Member')
+            status_label = 'Active' if u.is_active else 'Inactive'
+            joined_str = u.date_joined.strftime('%Y-%m-%d %H:%M') if u.date_joined else ''
+            login_str = u.last_login.strftime('%Y-%m-%d %H:%M') if u.last_login else 'Never'
+            rows.append([
+                u.id,
+                u.username,
+                u.email or 'N/A',
+                r_label,
+                status_label,
+                joined_str,
+                login_str,
+                u.rooms_hosted_count,
+                u.rooms_joined_count,
+                u.messages_sent_count,
+            ])
+
+        measured_width = _measure_table_content_width(headers, rows)
+        PORTRAIT_LIMIT = 547.27
+        LANDSCAPE_LIMIT = 773.89
+
+        if measured_width <= PORTRAIT_LIMIT:
+            tier = 'tier1'
+            recommended = 'portrait'
+        elif measured_width <= LANDSCAPE_LIMIT:
+            tier = 'tier2'
+            recommended = 'landscape'
+        else:
+            tier = 'tier3'
+            recommended = 'xlsx'
+
+        return Response({
+            'tier': tier,
+            'measured_width': round(measured_width, 1),
+            'recommended': recommended,
+            'total_records': len(user_list),
+        })
 
     # Handle Export Formats
     if export_format in ['csv', 'xls', 'xlsx', 'html', 'pdf']:
@@ -1125,7 +1258,7 @@ def admin_user_report(request):
             auto_print = request.GET.get('auto_print') in ['true', '1', True]
             return _build_html_response(filename, title, metadata_items, headers, rows, auto_print=auto_print)
         elif export_format == 'pdf':
-            return _build_pdf_response(filename, title, metadata_items, headers, rows)
+            return _build_pdf_response(filename, title, metadata_items, headers, rows, orientation=orientation)
         else:
             return _build_excel_response(filename, title, metadata_items, headers, rows, sheet_title='User Report', file_ext=export_format)
 
@@ -1155,6 +1288,8 @@ def admin_room_report(request):
     end_date = request.GET.get('end_date')
     search = request.GET.get('search', '').strip()
     export_format = (request.GET.get('export') or request.GET.get('file_format') or '').lower()
+    orientation = request.GET.get('orientation')
+    check_fit = request.GET.get('check_fit') in ['1', 'true', True]
 
     # Mandatory Date Range Validation
     if not start_date or not end_date:
@@ -1208,6 +1343,62 @@ def admin_room_report(request):
         qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
 
     room_list = list(qs)
+
+    # Content-based fit inspection for adaptive multi-tier PDF generation
+    if check_fit:
+        if not room_list:
+            return Response({'detail': 'No data found matching the selected filters.'}, status=404)
+
+        headers = [
+            'Room ID',
+            'Room Name',
+            'Topic',
+            'Creator (Host)',
+            'Date Created',
+            'Last Updated',
+            'Participants Count',
+            'Messages Count',
+            'Participants List',
+        ]
+        rows = []
+        for r in room_list:
+            host_str = r.host.username if r.host else 'Deleted User'
+            t_name = r.topic.name if r.topic else 'General'
+            created_str = r.created.strftime('%Y-%m-%d %H:%M') if r.created else ''
+            updated_str = r.updated.strftime('%Y-%m-%d %H:%M') if r.updated else ''
+            participants_str = ', '.join([p.username for p in r.participants.all()[:15]])
+            rows.append([
+                r.id,
+                r.name,
+                t_name,
+                host_str,
+                created_str,
+                updated_str,
+                r.participant_count,
+                r.message_count,
+                participants_str,
+            ])
+
+        measured_width = _measure_table_content_width(headers, rows)
+        PORTRAIT_LIMIT = 547.27
+        LANDSCAPE_LIMIT = 773.89
+
+        if measured_width <= PORTRAIT_LIMIT:
+            tier = 'tier1'
+            recommended = 'portrait'
+        elif measured_width <= LANDSCAPE_LIMIT:
+            tier = 'tier2'
+            recommended = 'landscape'
+        else:
+            tier = 'tier3'
+            recommended = 'xlsx'
+
+        return Response({
+            'tier': tier,
+            'measured_width': round(measured_width, 1),
+            'recommended': recommended,
+            'total_records': len(room_list),
+        })
 
     # Handle Export Formats
     if export_format in ['csv', 'xls', 'xlsx', 'html', 'pdf']:
@@ -1267,7 +1458,7 @@ def admin_room_report(request):
             auto_print = request.GET.get('auto_print') in ['true', '1', True]
             return _build_html_response(filename, title, metadata_items, headers, rows, auto_print=auto_print)
         elif export_format == 'pdf':
-            return _build_pdf_response(filename, title, metadata_items, headers, rows)
+            return _build_pdf_response(filename, title, metadata_items, headers, rows, orientation=orientation)
         else:
             return _build_excel_response(filename, title, metadata_items, headers, rows, sheet_title='Room Report', file_ext=export_format)
 

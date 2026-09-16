@@ -3,6 +3,7 @@ import * as s from './adminStyles';
 import {
   getReportFilterOptions,
   downloadReport,
+  checkReportPdfFit,
   openReportHtmlView,
 } from '../../api/admin';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -12,6 +13,28 @@ const reportTypes = [
   { value: 'user', label: 'User Report' },
   { value: 'room', label: 'Room Report' },
 ];
+
+const LandscapeIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5ec8e0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <line x1="2" y1="10" x2="22" y2="10" />
+  </svg>
+);
+
+const WarningShieldIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
+const ModalCloseIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
 
 // Standard SVG Icons (replacing emojis)
 const HtmlIcon = () => (
@@ -114,6 +137,10 @@ const AdminReports = () => {
   // Loading state during file download
   const [downloadingFormat, setDownloadingFormat] = useState(null);
 
+  // Multi-tier PDF adaptive orientation and advisory modals
+  const [orientationModal, setOrientationModal] = useState(null); // { measuredWidth: number }
+  const [tier3Modal, setTier3Modal] = useState(null); // { measuredWidth: number }
+
   // Load dropdown options on mount
   useEffect(() => {
     const fetchOptions = async () => {
@@ -152,8 +179,8 @@ const AdminReports = () => {
     setReportType(e.target.value);
   };
 
-  // Direct file download handler with mandatory validation & 404 detection
-  const handleDownload = async (format) => {
+  // Direct file download handler with mandatory validation, 404 detection, and adaptive multi-tier PDF routing
+  const handleDownload = async (format, orientationOverride = null) => {
     // Validate mandatory date range on Room Report
     if (reportType === 'room') {
       if (!roomFilters.start_date || !roomFilters.end_date) {
@@ -166,17 +193,67 @@ const AdminReports = () => {
       }
     }
 
+    const activeFilters = reportType === 'user' ? userFilters : roomFilters;
+
+    // Multi-tier adaptive layout checking for PDF downloads without explicit orientation override
+    if (format === 'pdf' && !orientationOverride) {
+      setDownloadingFormat('pdf');
+      try {
+        const fitInfo = await checkReportPdfFit({
+          type: reportType,
+          filters: activeFilters,
+        });
+
+        // Tier 2: Wide table (exceeds portrait, fits landscape) -> Ask user orientation preference
+        if (fitInfo.tier === 'tier2') {
+          setDownloadingFormat(null);
+          setOrientationModal({
+            measuredWidth: fitInfo.measured_width,
+          });
+          return;
+        }
+
+        // Tier 3: Ultra-wide table (exceeds landscape) -> Show spreadsheet recommendation modal
+        if (fitInfo.tier === 'tier3') {
+          setDownloadingFormat(null);
+          setTier3Modal({
+            measuredWidth: fitInfo.measured_width,
+          });
+          return;
+        }
+
+        // Tier 1: Fits comfortably within Portrait -> Direct zero-friction download
+        await downloadReport({
+          type: reportType,
+          format: 'pdf',
+          filters: activeFilters,
+          orientation: 'portrait',
+        });
+      } catch (err) {
+        const isNotFound = err.message?.toLowerCase().includes('no data') || err.status === 404;
+        showAlert(
+          isNotFound ? 'No Data Found' : 'Download Failed',
+          err.message || (isNotFound
+            ? 'No records match the selected filters. Please adjust your filter criteria and try again.'
+            : 'An unexpected error occurred while generating the PDF. Please try again.'),
+          isNotFound ? 'info' : 'danger'
+        );
+      } finally {
+        setDownloadingFormat(null);
+      }
+      return;
+    }
+
+    // Direct download for CSV, XLS, XLSX, or PDF with explicit orientation override
     setDownloadingFormat(format);
     try {
-      const activeFilters = reportType === 'user' ? userFilters : roomFilters;
       await downloadReport({
         type: reportType,
         format,
         filters: activeFilters,
+        orientation: orientationOverride,
       });
-      // On success, browser natively prompts/downloads the file without interrupting with a modal
     } catch (err) {
-      // Handles 404 "No data found matching the selected filters."
       const isNotFound = err.message?.toLowerCase().includes('no data') || err.status === 404;
       showAlert(
         isNotFound ? 'No Data Found' : 'Download Failed',
@@ -620,6 +697,336 @@ const AdminReports = () => {
         onConfirm={() => setAlertModal(null)}
         onCancel={() => setAlertModal(null)}
       />
+
+      {/* Tier 2: Orientation Recommendation Modal */}
+      {orientationModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setOrientationModal(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            backdropFilter: 'blur(5px)',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 480,
+              background: '#2d2e42',
+              borderRadius: 16,
+              border: '1px solid #40425a',
+              boxShadow: '0 24px 48px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05)',
+              padding: '24px 24px 20px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 14,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    background: 'rgba(94, 200, 224, 0.12)',
+                    border: '1px solid rgba(94, 200, 224, 0.28)',
+                  }}
+                >
+                  <LandscapeIcon />
+                </div>
+                <div>
+                  <h2
+                    style={{
+                      margin: 0,
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: '#f0f0f5',
+                      letterSpacing: '-0.2px',
+                    }}
+                  >
+                    Report Orientation Recommendation
+                  </h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setOrientationModal(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#7a7c90',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  borderRadius: '8px',
+                }}
+              >
+                <ModalCloseIcon />
+              </button>
+            </div>
+
+            <div
+              style={{
+                background: '#232435',
+                border: '1px solid #38394e',
+                borderRadius: 10,
+                padding: '14px 16px',
+                marginBottom: 20,
+                color: '#d1d2de',
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+            >
+              <p style={{ margin: '0 0 8px 0' }}>
+                This report requires approximately <strong>{orientationModal.measuredWidth} pt</strong> of table width, which exceeds standard A4 Portrait boundaries (547 pt).
+              </p>
+              <p style={{ margin: 0, color: '#94a3b8' }}>
+                We recommend downloading in <strong>Landscape</strong> orientation for optimal column spacing and legibility.
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                gap: 10,
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setOrientationModal(null)}
+                style={{
+                  ...s.btn('default'),
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  padding: '9px 14px',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOrientationModal(null);
+                  handleDownload('pdf', 'portrait');
+                }}
+                style={{
+                  ...s.btn('default'),
+                  background: '#242536',
+                  border: '1px solid #40425a',
+                  color: '#e2e8f0',
+                  padding: '9px 16px',
+                }}
+              >
+                Download Portrait
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOrientationModal(null);
+                  handleDownload('pdf', 'landscape');
+                }}
+                style={{
+                  ...s.btn('primary'),
+                  background: '#5ec8e0',
+                  color: '#1e1f2b',
+                  fontWeight: 600,
+                  padding: '9px 18px',
+                }}
+              >
+                Download Landscape (Recommended)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tier 3: Spreadsheet Advisory Modal */}
+      {tier3Modal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setTier3Modal(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            backdropFilter: 'blur(5px)',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 480,
+              background: '#2d2e42',
+              borderRadius: 16,
+              border: '1px solid #40425a',
+              boxShadow: '0 24px 48px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05)',
+              padding: '24px 24px 20px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 14,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    background: 'rgba(245, 158, 11, 0.12)',
+                    border: '1px solid rgba(245, 158, 11, 0.28)',
+                  }}
+                >
+                  <WarningShieldIcon />
+                </div>
+                <div>
+                  <h2
+                    style={{
+                      margin: 0,
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: '#f0f0f5',
+                      letterSpacing: '-0.2px',
+                    }}
+                  >
+                    Spreadsheet Export Recommended
+                  </h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setTier3Modal(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#7a7c90',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  borderRadius: '8px',
+                }}
+              >
+                <ModalCloseIcon />
+              </button>
+            </div>
+
+            <div
+              style={{
+                background: '#232435',
+                border: '1px solid #38394e',
+                borderRadius: 10,
+                padding: '14px 16px',
+                marginBottom: 20,
+                color: '#d1d2de',
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+            >
+              <p style={{ margin: '0 0 8px 0' }}>
+                This report contains extensive tabular columns measuring <strong>{tier3Modal.measuredWidth} pt</strong>, which exceeds standard printable A4 page dimensions (774 pt).
+              </p>
+              <p style={{ margin: 0, color: '#94a3b8' }}>
+                For complete data fidelity and horizontal analysis, exporting to spreadsheet format (Excel or CSV) is strongly recommended.
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                gap: 10,
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setTier3Modal(null)}
+                style={{
+                  ...s.btn('default'),
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  padding: '9px 14px',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTier3Modal(null);
+                  handleDownload('pdf', 'landscape');
+                }}
+                style={{
+                  ...s.btn('default'),
+                  background: '#242536',
+                  border: '1px solid #7f1d1d',
+                  color: '#fca5a5',
+                  padding: '9px 16px',
+                }}
+              >
+                Download PDF Anyway
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTier3Modal(null);
+                  handleDownload('xlsx');
+                }}
+                style={{
+                  ...s.btn('success'),
+                  background: '#107c41',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  padding: '9px 18px',
+                }}
+              >
+                Download Excel (XLSX)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
