@@ -90,6 +90,9 @@ def getRoutes(request):
         'PATCH /api/admin/users/:id/',
         'DELETE /api/admin/users/:id/',
         'GET /api/admin/rooms/',
+        'POST /api/admin/rooms/create/',
+        'GET /api/admin/rooms/upload-template/',
+        'POST /api/admin/rooms/bulk-upload/',
         'PUT /api/admin/rooms/:id/',
         'DELETE /api/admin/rooms/:id/',
         'GET /api/admin/topics/',
@@ -567,6 +570,24 @@ def adminGetRooms(request):
     page = paginator.paginate_queryset(rooms, request)
     serializer = RoomSerializer(page, many=True, context={'request': request})
     return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsSuperUser])
+def adminCreateRoom(request):
+    serializer = RoomWriteSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    host = serializer.validated_data.get('host') or request.user
+    room = serializer.save(host=host)
+
+    if room.host and not room.participants.filter(id=room.host.id).exists():
+        room.participants.add(room.host)
+
+    return Response(
+        RoomSerializer(room, context={'request': request}).data,
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @api_view(['PUT', 'PATCH'])

@@ -83,6 +83,53 @@ export const getRooms = async ({ search, topic, host, page = 1, page_size = 25 }
   }
 };
 
+export const createRoom = async (data) => {
+  try {
+    const response = await client.post('/admin/rooms/create/', data);
+    return response.data;
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Failed to create room'));
+  }
+};
+
+export const downloadRoomsTemplate = async () => {
+  try {
+    const response = await client.get('/admin/rooms/upload-template/', {
+      responseType: 'blob',
+    });
+
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.setAttribute('download', 'studybud_rooms_template.xlsx');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Failed to download rooms template'));
+  }
+};
+
+export const bulkUploadRooms = async (file) => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await client.post('/admin/rooms/bulk-upload/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Failed to upload rooms spreadsheet'));
+  }
+};
+
 export const updateRoom = async (id, data) => {
   try {
     const response = await client.patch(`/admin/rooms/${id}/update/`, data);
@@ -311,4 +358,3 @@ export const openReportHtmlView = async ({ type, filters = {}, autoPrint = false
     throw new Error(extractErrorMessage(error, 'Failed to generate HTML report view.'));
   }
 };
-

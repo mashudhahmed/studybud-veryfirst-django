@@ -4,6 +4,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import views
 from . import reports
+from . import rooms_upload
 
 urlpatterns = [
 
@@ -54,6 +55,9 @@ urlpatterns = [
     path('admin/users/<str:pk>/delete/', views.adminDeleteUser),
 
     path('admin/rooms/', views.adminGetRooms),
+    path('admin/rooms/create/', views.adminCreateRoom),
+    path('admin/rooms/upload-template/', rooms_upload.admin_rooms_upload_template),
+    path('admin/rooms/bulk-upload/', rooms_upload.admin_bulk_upload_rooms),
     path('admin/rooms/<str:pk>/update/', views.adminUpdateRoom),
     path('admin/rooms/<str:pk>/delete/', views.adminDeleteRoom),
 

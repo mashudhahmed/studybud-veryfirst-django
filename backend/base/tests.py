@@ -1,8 +1,243 @@
 from datetime import date, timedelta
+import io
+import openpyxl
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 from base.models import Topic, Room, Message
+
+
+class AdminRoomCreateApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.admin_user = User.objects.create_superuser(
+            username='adminuser',
+            email='admin@example.com',
+            password='password123'
+        )
+
+        self.normal_user = User.objects.create_user(
+            username='regularuser',
+            email='regular@example.com',
+            password='password123'
+        )
+
+        self.topic = Topic.objects.create(name='Django Dev')
+
+    def test_admin_create_room_unauthenticated(self):
+        res = self.client.post('/api/admin/rooms/create/', {
+            'name': 'Test Room',
+            'topic': 'Django Dev',
+        })
+        self.assertEqual(res.status_code, 401)
+
+    def test_admin_create_room_forbidden_for_regular_user(self):
+        self.client.force_authenticate(user=self.normal_user)
+        res = self.client.post('/api/admin/rooms/create/', {
+            'name': 'Test Room',
+            'topic': 'Django Dev',
+        })
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_create_room_success(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.post('/api/admin/rooms/create/', {
+            'name': 'Superuser Room',
+            'topic': 'Django Dev',
+            'description': 'Created by superuser from admin dashboard',
+            'host': self.admin_user.id,
+            'participants': [self.admin_user.id, self.normal_user.id],
+        })
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data['name'], 'Superuser Room')
+        self.assertEqual(res.data['host']['username'], 'adminuser')
+        self.assertEqual(len(res.data['participants']), 2)
+
+    def test_admin_create_room_with_assigned_host(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.post('/api/admin/rooms/create/', {
+            'name': 'Assigned Host Room',
+            'topic': 'Django Dev',
+            'description': 'Admin assigned regular user as host',
+            'host': self.normal_user.id,
+            'participants': [self.normal_user.id],
+        })
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data['host']['username'], 'regularuser')
+
+
+class AdminRoomBulkUploadApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.admin_user = User.objects.create_superuser(
+            username='adminuser',
+            email='admin@example.com',
+            password='password123'
+        )
+
+        self.normal_user = User.objects.create_user(
+            username='regularuser',
+            email='regular@example.com',
+            password='password123'
+        )
+
+        self.topic = Topic.objects.create(name='Python')
+
+    def test_upload_template_unauthenticated(self):
+        res = self.client.get('/api/admin/rooms/upload-template/')
+        self.assertEqual(res.status_code, 401)
+
+    def test_upload_template_forbidden_for_regular_user(self):
+        self.client.force_authenticate(user=self.normal_user)
+        res = self.client.get('/api/admin/rooms/upload-template/')
+        self.assertEqual(res.status_code, 403)
+
+    def test_upload_template_success(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.get('/api/admin/rooms/upload-template/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(
+            res['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        self.assertIn('studybud_rooms_template.xlsx', res['Content-Disposition'])
+
+    def test_bulk_upload_unauthenticated(self):
+        res = self.client.post('/api/admin/rooms/bulk-upload/')
+        self.assertEqual(res.status_code, 401)
+
+    def test_bulk_upload_forbidden_for_regular_user(self):
+        self.client.force_authenticate(user=self.normal_user)
+        res = self.client.post('/api/admin/rooms/bulk-upload/')
+        self.assertEqual(res.status_code, 403)
+
+    def test_bulk_upload_no_file(self):
+        self.client.force_authenticate(user=self.admin_user)
+        res = self.client.post('/api/admin/rooms/bulk-upload/', {})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('No file uploaded', res.data['detail'])
+
+    def test_bulk_upload_invalid_extension(self):
+        self.client.force_authenticate(user=self.admin_user)
+        fake_file = SimpleUploadedFile("rooms.csv", b"name,topic\nRoom 1,Python", content_type="text/csv")
+        res = self.client.post('/api/admin/rooms/bulk-upload/', {'file': fake_file}, format='multipart')
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Invalid file format', res.data['detail'])
+
+    def test_bulk_upload_partial_success_mode(self):
+        self.client.force_authenticate(user=self.admin_user)
+
+        # Build in-memory xlsx file with 4 rows: 2 valid, 2 invalid
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(['name', 'topic', 'description', 'host', 'participants'])
+        ws.append(['Valid Room One', 'Python', 'A valid room', 'regularuser', 'regularuser, adminuser'])
+        ws.append(['Valid Room Two', 'NewTopicAutoCreated', 'Auto topic room', '', ''])
+        ws.append(['AB', 'Short Name', '', '', ''])  # invalid: < 3 chars
+        ws.append(['Invalid Host Room', 'Python', '', 'ghost_user', ''])  # invalid: host not found
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        uploaded = SimpleUploadedFile(
+            'rooms_bulk.xlsx',
+            buf.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+        res = self.client.post('/api/admin/rooms/bulk-upload/', {'file': uploaded}, format='multipart')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['total_rows'], 4)
+        self.assertEqual(res.data['created_count'], 2)
+        self.assertEqual(len(res.data['errors']), 2)
+
+        # Check that error rows describe the issues
+        row_errors = {err['room_name']: err['error'] for err in res.data['errors']}
+        self.assertIn('AB', row_errors)
+        self.assertIn('at least 3 characters', row_errors['AB'])
+        self.assertIn('Invalid Host Room', row_errors)
+        self.assertIn("Host user 'ghost_user' was not found", row_errors['Invalid Host Room'])
+
+        # Check that valid rooms exist in DB
+        room1 = Room.objects.filter(name='Valid Room One').first()
+        self.assertIsNotNone(room1)
+        self.assertEqual(room1.host, self.normal_user)
+        self.assertEqual(room1.topic.name, 'Python')
+        self.assertEqual(room1.participants.count(), 2)
+
+        room2 = Room.objects.filter(name='Valid Room Two').first()
+        self.assertIsNotNone(room2)
+        self.assertEqual(room2.host, self.admin_user)
+        self.assertEqual(room2.topic.name, 'NewTopicAutoCreated')
+
+    def test_bulk_upload_duplicate_prevention(self):
+        self.client.force_authenticate(user=self.admin_user)
+
+        # Pre-create a room in the DB
+        Room.objects.create(name='Existing Database Room', topic=self.topic, host=self.admin_user)
+
+        # Build file with: existing DB room, fresh room, and intra-file duplicate
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(['name', 'topic', 'description', 'host'])
+        ws.append(['Existing Database Room', 'Python', 'Should be skipped as duplicate', 'adminuser'])
+        ws.append(['Unique Fresh Room', 'Python', 'Should be created', 'adminuser'])
+        ws.append(['Unique Fresh Room', 'Python', 'Duplicate in file, should be skipped', 'adminuser'])
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        uploaded = SimpleUploadedFile(
+            'rooms_dups.xlsx',
+            buf.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+        res = self.client.post('/api/admin/rooms/bulk-upload/', {'file': uploaded}, format='multipart')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['created_count'], 1)
+        self.assertEqual(res.data['skipped_duplicates_count'], 2)
+        self.assertEqual(len(res.data['duplicates']), 2)
+
+        # Verify only 1 fresh room was created
+        self.assertEqual(Room.objects.filter(name='Unique Fresh Room').count(), 1)
+        self.assertEqual(Room.objects.filter(name='Existing Database Room').count(), 1)
+
+    def test_bulk_upload_flexible_header_matching(self):
+        self.client.force_authenticate(user=self.admin_user)
+
+        # Build file with empty row before header and alternative column titles
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(['StudyBud Rooms Export - Title Header'])  # Non-header row
+        ws.append(['Room Name', 'Category', 'About', 'Creator', 'Members'])
+        ws.append(['Flexible Header Room', 'Web Dev', 'Created with custom headers', 'regularuser', 'adminuser'])
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        uploaded = SimpleUploadedFile(
+            'rooms_flexible.xlsx',
+            buf.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+        res = self.client.post('/api/admin/rooms/bulk-upload/', {'file': uploaded}, format='multipart')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['created_count'], 1)
+        self.assertEqual(res.data['skipped_duplicates_count'], 0)
+        self.assertEqual(len(res.data['errors']), 0)
+
+        room = Room.objects.filter(name='Flexible Header Room').first()
+        self.assertIsNotNone(room)
+        self.assertEqual(room.topic.name, 'Web Dev')
+        self.assertEqual(room.host, self.normal_user)
 
 
 class ReportApiTests(TestCase):
@@ -180,7 +415,3 @@ class ReportApiTests(TestCase):
         res = self.client.get('/api/admin/reports/rooms/?check_fit=1')
         self.assertEqual(res.status_code, 400)
         self.assertIn('detail', res.data)
-
-
-
-

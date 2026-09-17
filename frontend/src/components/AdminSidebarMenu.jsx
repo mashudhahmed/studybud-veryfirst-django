@@ -66,7 +66,7 @@ const AdminSidebarMenu = () => {
           }}
         >
           {links.map((link) => {
-            const active = location.pathname === link.to;
+            const active = location.pathname.startsWith(link.to);
             return (
               <Link
                 key={link.to}

@@ -4,6 +4,7 @@ import RoomCard from '../components/RoomCard';
 import ActivitySidebar from '../components/ActivitySidebar';
 import AdminSidebarMenu from '../components/AdminSidebarMenu';
 import AdminRooms from './admin/AdminRooms';
+import AdminCreateRoom from './admin/AdminCreateRoom';
 import AdminTopics from './admin/AdminTopics';
 import AdminUsers from './admin/AdminUsers';
 import AdminEditRoom from './admin/AdminEditRoom';
@@ -25,15 +26,17 @@ const Home = () => {
 
   const adminView = location.pathname.match(/^\/admin\/rooms\/\d+\/edit\/?$/)
     ? 'room-edit'
-    : location.pathname.startsWith('/admin/rooms')
-      ? 'rooms'
-      : location.pathname.startsWith('/admin/topics')
-        ? 'topics'
-        : location.pathname.startsWith('/admin/users')
-          ? 'users'
-          : location.pathname.startsWith('/admin/reports')
-            ? 'reports'
-            : null;
+    : location.pathname.match(/^\/admin\/rooms\/create\/?$/)
+      ? 'room-create'
+      : location.pathname.startsWith('/admin/rooms')
+        ? 'rooms'
+        : location.pathname.startsWith('/admin/topics')
+          ? 'topics'
+          : location.pathname.startsWith('/admin/users')
+            ? 'users'
+            : location.pathname.startsWith('/admin/reports')
+              ? 'reports'
+              : null;
 
   useEffect(() => {
     if (!adminView) fetchRooms();
@@ -196,6 +199,7 @@ const Home = () => {
       {adminView ? (
         <div style={{ minWidth: 0 }}>
           {adminView === 'rooms' && <AdminRooms />}
+          {adminView === 'room-create' && <AdminCreateRoom />}
           {adminView === 'room-edit' && <AdminEditRoom />}
           {adminView === 'topics' && <AdminTopics />}
           {adminView === 'users' && <AdminUsers />}

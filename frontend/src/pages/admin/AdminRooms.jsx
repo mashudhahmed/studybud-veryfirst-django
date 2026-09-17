@@ -6,6 +6,7 @@ import { getMessages } from '../../api/messages';
 import { useToast } from '../../context/ToastContext';
 import Avatar from '../../components/Avatar';
 import ConfirmModal from '../../components/ConfirmModal';
+import AdminBulkUploadRoomsModal from './AdminBulkUploadRoomsModal';
 import SearchableSelect from '../../components/SearchableSelect';
 import * as s from './adminStyles';
 
@@ -35,6 +36,7 @@ const AdminRooms = () => {
   const [pageSize, setPageSize] = useState(25);
   const [pagination, setPagination] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   const [confirmRoom, setConfirmRoom] = useState(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
@@ -138,6 +140,25 @@ const AdminRooms = () => {
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  const handleUploadSuccess = useCallback((summary) => {
+    if (!summary) {
+      fetchRooms();
+      return;
+    }
+    const { isClean, created_count, duplicates_count, errors_count } = summary;
+    if (isClean) {
+      showToast(`Successfully created ${created_count} room${created_count > 1 ? 's' : ''} from spreadsheet!`, 'success');
+    } else if (created_count > 0) {
+      const notes = [];
+      if (duplicates_count > 0) notes.push(`${duplicates_count} duplicate(s) skipped`);
+      if (errors_count > 0) notes.push(`${errors_count} error(s)`);
+      const extra = notes.length > 0 ? ` (${notes.join(', ')})` : '';
+      showToast(`Import completed: ${created_count} room${created_count > 1 ? 's' : ''} created${extra}.`, 'success');
+    }
+    setPage(1);
+    fetchRooms();
+  }, [showToast, fetchRooms]);
+
   const requestDelete = (room) => setConfirmRoom(room);
 
   const runDelete = async () => {
@@ -227,6 +248,41 @@ const AdminRooms = () => {
               Clear
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setUploadModalOpen(true)}
+            style={{
+              ...s.btn('default'),
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '9px 16px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Upload XLSX
+          </button>
+          <Link
+            to="/admin/rooms/create"
+            style={{
+              ...s.btn('primary'),
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '9px 16px',
+              fontSize: 13,
+              boxShadow: '0 2px 8px rgba(94, 200, 224, 0.25)',
+            }}
+          >
+            <span style={{ fontSize: 16, lineHeight: 1, fontWeight: 700 }}>+</span> Add Room
+          </Link>
         </div>
       </div>
 
@@ -236,7 +292,43 @@ const AdminRooms = () => {
         {loading ? (
           <div style={s.emptyState}>Loading rooms...</div>
         ) : rooms.length === 0 ? (
-          <div style={s.emptyState}>No rooms found.</div>
+          <div style={{ ...s.emptyState, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+            <span>No rooms found.</span>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setUploadModalOpen(true)}
+                style={{
+                  ...s.btn('default'),
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 16px',
+                  cursor: 'pointer',
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                Upload XLSX
+              </button>
+              <Link
+                to="/admin/rooms/create"
+                style={{
+                  ...s.btn('primary'),
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 16px',
+                }}
+              >
+                <span style={{ fontSize: 16, lineHeight: 1, fontWeight: 700 }}>+</span> Add Room
+              </Link>
+            </div>
+          </div>
         ) : (
           <div style={s.tableWrap}>
             <table style={s.table}>
@@ -396,6 +488,12 @@ const AdminRooms = () => {
           </button>
         </div>
       )}
+
+      <AdminBulkUploadRoomsModal
+        open={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        onSuccess={handleUploadSuccess}
+      />
 
       <ConfirmModal
         open={!!confirmRoom}

@@ -108,6 +108,14 @@ const App = () => {
               }
             />
             <Route
+              path="/admin/rooms/create"
+              element={
+                <AdminRoute>
+                  <Home />
+                </AdminRoute>
+              }
+            />
+            <Route
               path="/admin/topics"
               element={
                 <AdminRoute>
