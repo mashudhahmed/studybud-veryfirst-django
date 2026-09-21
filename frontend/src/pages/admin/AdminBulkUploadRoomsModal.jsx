@@ -318,7 +318,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                       Need the Excel template?
                     </div>
                     <div style={{ color: s.colors.lightGray, fontSize: 12 }}>
-                      Download the sample spreadsheet with sample rows and column structure.
+                      Download the sample spreadsheet with columns pre-formatted for import.
                     </div>
                   </div>
                 </div>
@@ -450,8 +450,9 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                   <li><strong>Import Policy</strong>: All rows must be valid. If any duplicates or errors are found, no rooms will be created until they are resolved.</li>
                   <li><strong>Room / Name</strong> (Required, min 3 chars): Must be unique. Existing rooms or intra-file duplicates will abort the upload.</li>
                   <li><strong>Topic</strong> (Optional): Topic is matched or auto-created on the fly.</li>
-                  <li><strong>Host</strong> (Optional): Username, email, or user ID. Defaults to your admin account.</li>
+                  <li><strong>Description</strong> (Optional): Room purpose and details.</li>
                   <li><strong>Participants</strong> (Optional): Comma-separated usernames or emails.</li>
+                  <li><strong>Host / Creator</strong>: Automatically assigned to your administrator account.</li>
                 </ul>
               </div>
 

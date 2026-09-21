@@ -127,17 +127,15 @@ class AdminRoomBulkUploadApiTests(TestCase):
         self.assertEqual(res.status_code, 400)
         self.assertIn('Invalid file format', res.data['detail'])
 
-    def test_bulk_upload_partial_success_mode(self):
+    def test_bulk_upload_success_automatic_host(self):
         self.client.force_authenticate(user=self.admin_user)
 
-        # Build in-memory xlsx file with 4 rows: 2 valid, 2 invalid
+        # Build in-memory xlsx file with 2 valid rooms
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.append(['name', 'topic', 'description', 'host', 'participants'])
-        ws.append(['Valid Room One', 'Python', 'A valid room', 'regularuser', 'regularuser, adminuser'])
-        ws.append(['Valid Room Two', 'NewTopicAutoCreated', 'Auto topic room', '', ''])
-        ws.append(['AB', 'Short Name', '', '', ''])  # invalid: < 3 chars
-        ws.append(['Invalid Host Room', 'Python', '', 'ghost_user', ''])  # invalid: host not found
+        ws.append(['name', 'topic', 'description', 'participants'])
+        ws.append(['Valid Room One', 'Python', 'A valid room', 'regularuser'])
+        ws.append(['Valid Room Two', 'NewTopicAutoCreated', 'Auto topic room', ''])
 
         buf = io.BytesIO()
         wb.save(buf)
@@ -151,42 +149,66 @@ class AdminRoomBulkUploadApiTests(TestCase):
 
         res = self.client.post('/api/admin/rooms/bulk-upload/', {'file': uploaded}, format='multipart')
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data['total_rows'], 4)
+        self.assertEqual(res.data['total_rows'], 2)
         self.assertEqual(res.data['created_count'], 2)
-        self.assertEqual(len(res.data['errors']), 2)
+        self.assertEqual(len(res.data['errors']), 0)
+        self.assertEqual(len(res.data['duplicates']), 0)
 
-        # Check that error rows describe the issues
-        row_errors = {err['room_name']: err['error'] for err in res.data['errors']}
-        self.assertIn('AB', row_errors)
-        self.assertIn('at least 3 characters', row_errors['AB'])
-        self.assertIn('Invalid Host Room', row_errors)
-        self.assertIn("Host user 'ghost_user' was not found", row_errors['Invalid Host Room'])
-
-        # Check that valid rooms exist in DB
+        # Verify rooms are created and automatically hosted by uploading admin
         room1 = Room.objects.filter(name='Valid Room One').first()
         self.assertIsNotNone(room1)
-        self.assertEqual(room1.host, self.normal_user)
+        self.assertEqual(room1.host, self.admin_user)
         self.assertEqual(room1.topic.name, 'Python')
-        self.assertEqual(room1.participants.count(), 2)
+        self.assertEqual(room1.participants.count(), 2)  # adminuser + regularuser
 
         room2 = Room.objects.filter(name='Valid Room Two').first()
         self.assertIsNotNone(room2)
         self.assertEqual(room2.host, self.admin_user)
         self.assertEqual(room2.topic.name, 'NewTopicAutoCreated')
 
-    def test_bulk_upload_duplicate_prevention(self):
+    def test_bulk_upload_all_or_nothing_aborts_on_error(self):
+        self.client.force_authenticate(user=self.admin_user)
+
+        # Build in-memory xlsx file with 1 valid row and 1 invalid row (< 3 chars)
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(['name', 'topic', 'description'])
+        ws.append(['Valid Room Alpha', 'Python', 'A valid room'])
+        ws.append(['AB', 'Short Name', ''])  # invalid: < 3 chars
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        uploaded = SimpleUploadedFile(
+            'rooms_invalid.xlsx',
+            buf.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+        res = self.client.post('/api/admin/rooms/bulk-upload/', {'file': uploaded}, format='multipart')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['total_rows'], 2)
+        # All-or-nothing: 0 rooms created because 1 error exists
+        self.assertEqual(res.data['created_count'], 0)
+        self.assertEqual(len(res.data['errors']), 1)
+        self.assertIn('at least 3 characters', res.data['errors'][0]['error'])
+
+        # Verify nothing was saved to DB
+        self.assertFalse(Room.objects.filter(name='Valid Room Alpha').exists())
+
+    def test_bulk_upload_duplicate_prevention_aborts_all(self):
         self.client.force_authenticate(user=self.admin_user)
 
         # Pre-create a room in the DB
         Room.objects.create(name='Existing Database Room', topic=self.topic, host=self.admin_user)
 
-        # Build file with: existing DB room, fresh room, and intra-file duplicate
+        # Build file with: existing DB room and fresh room
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.append(['name', 'topic', 'description', 'host'])
-        ws.append(['Existing Database Room', 'Python', 'Should be skipped as duplicate', 'adminuser'])
-        ws.append(['Unique Fresh Room', 'Python', 'Should be created', 'adminuser'])
-        ws.append(['Unique Fresh Room', 'Python', 'Duplicate in file, should be skipped', 'adminuser'])
+        ws.append(['name', 'topic', 'description'])
+        ws.append(['Existing Database Room', 'Python', 'Should trigger duplicate abort'])
+        ws.append(['Unique Fresh Room', 'Python', 'Should not be created due to all-or-nothing'])
 
         buf = io.BytesIO()
         wb.save(buf)
@@ -200,13 +222,12 @@ class AdminRoomBulkUploadApiTests(TestCase):
 
         res = self.client.post('/api/admin/rooms/bulk-upload/', {'file': uploaded}, format='multipart')
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data['created_count'], 1)
-        self.assertEqual(res.data['skipped_duplicates_count'], 2)
-        self.assertEqual(len(res.data['duplicates']), 2)
+        self.assertEqual(res.data['created_count'], 0)
+        self.assertEqual(res.data['skipped_duplicates_count'], 1)
+        self.assertEqual(len(res.data['duplicates']), 1)
 
-        # Verify only 1 fresh room was created
-        self.assertEqual(Room.objects.filter(name='Unique Fresh Room').count(), 1)
-        self.assertEqual(Room.objects.filter(name='Existing Database Room').count(), 1)
+        # Verify fresh room was NOT created
+        self.assertFalse(Room.objects.filter(name='Unique Fresh Room').exists())
 
     def test_bulk_upload_flexible_header_matching(self):
         self.client.force_authenticate(user=self.admin_user)
@@ -215,8 +236,8 @@ class AdminRoomBulkUploadApiTests(TestCase):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.append(['StudyBud Rooms Export - Title Header'])  # Non-header row
-        ws.append(['Room Name', 'Category', 'About', 'Creator', 'Members'])
-        ws.append(['Flexible Header Room', 'Web Dev', 'Created with custom headers', 'regularuser', 'adminuser'])
+        ws.append(['Room Name', 'Category', 'About', 'Members'])
+        ws.append(['Flexible Header Room', 'Web Dev', 'Created with custom headers', 'regularuser'])
 
         buf = io.BytesIO()
         wb.save(buf)
@@ -237,7 +258,7 @@ class AdminRoomBulkUploadApiTests(TestCase):
         room = Room.objects.filter(name='Flexible Header Room').first()
         self.assertIsNotNone(room)
         self.assertEqual(room.topic.name, 'Web Dev')
-        self.assertEqual(room.host, self.normal_user)
+        self.assertEqual(room.host, self.admin_user)
 
 
 class ReportApiTests(TestCase):

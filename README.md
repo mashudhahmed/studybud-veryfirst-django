@@ -109,9 +109,10 @@ studybud/
 - **Administrative Panel**: Role-based access control for managing rooms, topics, and user accounts.
 - **Bulk Excel Room Upload & Template Generator**:
   - **All-or-Nothing Atomic Import**: Two-phase dry-run validation ensures that either 100% of rows are valid and committed atomically via `transaction.atomic()`, or 0 changes are written to the database if duplicates or validation errors exist.
-  - **Dynamic Format & Aliases**: Supports flexible header aliases (`room`, `title`, `topic`, `host`, `participants`), dynamic header row detection, and automatic topic resolution.
-  - **Downloadable Sample Template**: Pre-styled Excel template (`.xlsx`) with sample rows, instructions, and column structure.
-  - **Interactive Review & Correction Modal**: Real-time metric cards, detailed duplicate/error tables with row indicators, and a one-click *"Upload Corrected File"* retry flow.
+  - **Automatic Host Assignment**: Imported rooms are automatically owned and hosted by the authenticated administrator performing the upload.
+  - **Dynamic Format & Aliases**: Supports flexible header aliases (`room`, `title`, `topic`, `participants`), dynamic header row detection, and automatic topic resolution.
+  - **Downloadable Sample Template**: Pre-styled Excel template (`.xlsx`) with sample rows, instructions, and column structure (`name`, `topic`, `description`, `participants`).
+  - **Interactive Review & Correction Modal**: Real-time metric cards, detailed duplicate/error tables with row indicators, 1-click clipboard issue copying, and an *"Upload Corrected File"* retry flow.
 - **Executive Reports and Data Export**: Dedicated administrative export center for generating custom User and Room activity reports:
   - **Export & View Formats**: Interactive HTML view, direct browser Print, vector PDF export (`reportlab`), and spreadsheet exports in CSV, XLS, and XLSX.
   - **Branded Presentation**: Centered brand logo, full-width executive metadata card, and center-aligned numeric/status data tables.

@@ -20,33 +20,31 @@ def admin_rooms_upload_template(request):
     """
     Generates and downloads an Excel (.xlsx) template for bulk uploading rooms.
     Includes styled headers and sample rows to guide administrators.
+    Room host is automatically assigned to the uploading administrator.
     """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Rooms Import Template"
 
-    headers = ["name", "topic", "description", "host", "participants"]
+    headers = ["name", "topic", "description", "participants"]
     sample_rows = [
         [
             "Fullstack React & Django Mastery",
             "Python",
             "Discussions on React 19, Django REST Framework, and architecture.",
-            "admin",
-            "admin, alice, bob",
+            "alice, bob",
         ],
         [
             "Algorithms & LeetCode Study Group",
             "Algorithms",
             "Weekly competitive programming and technical interview prep.",
             "",
-            "",
         ],
         [
             "Cloud & DevOps Fundamentals",
             "DevOps",
             "Docker, Kubernetes, and CI/CD pipelines.",
-            "admin",
-            "admin",
+            "alice",
         ],
     ]
 
@@ -107,7 +105,8 @@ def admin_bulk_upload_rooms(request):
     """
     Parses an uploaded Excel (.xlsx) file and creates rooms in bulk using an
     All-or-Nothing (Atomic) policy:
-      - Phase 1: In-memory dry-run validation of all rows (duplicates, format, host resolution).
+      - Phase 1: In-memory dry-run validation of all rows (duplicates, format).
+      - Host is automatically assigned to the uploading admin (request.user).
       - If ANY error or duplicate exists, the entire batch is aborted (0 rooms/topics created).
       - Phase 2: If 100% valid, all rooms and topics are committed in a single atomic transaction.
     """
@@ -150,7 +149,6 @@ def admin_bulk_upload_rooms(request):
     NAME_ALIASES = {'name', 'room', 'room_name', 'room name', 'title', 'room title'}
     TOPIC_ALIASES = {'topic', 'topic_name', 'topic name', 'category', 'subject'}
     DESC_ALIASES = {'description', 'desc', 'details', 'about', 'body'}
-    HOST_ALIASES = {'host', 'creator', 'owner', 'author', 'admin'}
     PARTS_ALIASES = {'participants', 'members', 'users', 'participant', 'member'}
 
     # Scan the first 10 rows to locate header row
@@ -170,8 +168,6 @@ def admin_bulk_upload_rooms(request):
                     temp_map['topic'] = c_idx
                 elif raw_clean in DESC_ALIASES or cleaned in DESC_ALIASES:
                     temp_map['description'] = c_idx
-                elif raw_clean in HOST_ALIASES or cleaned in HOST_ALIASES:
-                    temp_map['host'] = c_idx
                 elif raw_clean in PARTS_ALIASES or cleaned in PARTS_ALIASES:
                     temp_map['participants'] = c_idx
         if 'name' in temp_map:
@@ -188,7 +184,6 @@ def admin_bulk_upload_rooms(request):
     name_idx = header_map['name']
     topic_idx = header_map.get('topic')
     desc_idx = header_map.get('description')
-    host_idx = header_map.get('host')
     parts_idx = header_map.get('participants')
 
     # Pre-fetch existing database state for O(1) in-memory lookups
@@ -234,6 +229,9 @@ def admin_bulk_upload_rooms(request):
     duplicates = []
     errors = []
     total_processed = 0
+
+    # The room host is always the administrator who uploaded the spreadsheet
+    uploading_admin = request.user
 
     # Phase 1: Validate all rows (Dry-run)
     for offset, row in enumerate(data_rows):
@@ -287,24 +285,8 @@ def admin_bulk_upload_rooms(request):
         if desc_idx is not None and desc_idx < len(row) and row[desc_idx] is not None:
             description = str(row[desc_idx]).strip()
 
-        # Host resolution
-        host_user = request.user
-        if host_idx is not None and host_idx < len(row) and row[host_idx] is not None:
-            raw_host = str(row[host_idx]).strip()
-            if raw_host:
-                found_host = resolve_user(raw_host)
-                if found_host:
-                    host_user = found_host
-                else:
-                    errors.append({
-                        'row': row_num,
-                        'room_name': raw_name,
-                        'error': f"Host user '{raw_host}' was not found in the system.",
-                    })
-                    continue
-
-        # Participants resolution
-        participants_set = {host_user}
+        # Participants resolution (uploading admin is automatically a participant)
+        participants_set = {uploading_admin}
         if parts_idx is not None and parts_idx < len(row) and row[parts_idx] is not None:
             raw_parts = str(row[parts_idx]).strip()
             if raw_parts:
@@ -318,7 +300,7 @@ def admin_bulk_upload_rooms(request):
             'name': raw_name,
             'raw_topic': raw_topic,
             'description': description,
-            'host': host_user,
+            'host': uploading_admin,
             'participants': list(participants_set),
         })
 
