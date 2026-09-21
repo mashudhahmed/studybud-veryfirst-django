@@ -6,7 +6,7 @@ A collaborative study room and messaging web application built with Django REST 
 
 ## Tech Stack
 
-- **Backend**: Python, Django 6.1, Django REST Framework, Simple JWT (Authentication), openpyxl (Excel Report Generation), SQLite
+- **Backend**: Python, Django 6.1, Django REST Framework, Simple JWT (Authentication), openpyxl (Excel Report Generation & Bulk Upload), ReportLab (PDF Generation), SQLite
 - **Frontend**: React 18, React Router v6, Axios, Responsive CSS
 
 ---
@@ -107,6 +107,11 @@ studybud/
 - **Authentication and Session Security**: User registration, login, token refresh, and auto-logout on session expiration.
 - **User Profiles**: Manage bio, avatar images, and view user participant history.
 - **Administrative Panel**: Role-based access control for managing rooms, topics, and user accounts.
+- **Bulk Excel Room Upload & Template Generator**:
+  - **All-or-Nothing Atomic Import**: Two-phase dry-run validation ensures that either 100% of rows are valid and committed atomically via `transaction.atomic()`, or 0 changes are written to the database if duplicates or validation errors exist.
+  - **Dynamic Format & Aliases**: Supports flexible header aliases (`room`, `title`, `topic`, `host`, `participants`), dynamic header row detection, and automatic topic resolution.
+  - **Downloadable Sample Template**: Pre-styled Excel template (`.xlsx`) with sample rows, instructions, and column structure.
+  - **Interactive Review & Correction Modal**: Real-time metric cards, detailed duplicate/error tables with row indicators, and a one-click *"Upload Corrected File"* retry flow.
 - **Executive Reports and Data Export**: Dedicated administrative export center for generating custom User and Room activity reports:
   - **Export & View Formats**: Interactive HTML view, direct browser Print, vector PDF export (`reportlab`), and spreadsheet exports in CSV, XLS, and XLSX.
   - **Branded Presentation**: Centered brand logo, full-width executive metadata card, and center-aligned numeric/status data tables.
@@ -114,8 +119,15 @@ studybud/
 
 ---
 
-## API Endpoints Reference (Reports)
+## API Endpoints Reference
 
+### Bulk Room Management
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/admin/rooms/upload-template/` | `GET` | Download sample Excel (`.xlsx`) room upload template with instructions |
+| `/api/admin/rooms/bulk-upload/` | `POST` | Bulk upload rooms from Excel (`.xlsx`) with atomic all-or-nothing validation |
+
+### Administrative Reports
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
 | `/api/admin/reports/options/` | `GET` | Dynamic dropdown metadata (users, topics, roles) |
