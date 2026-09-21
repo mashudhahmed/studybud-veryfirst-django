@@ -198,7 +198,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
               {hasReport
                 ? result?.created_count > 0
                   ? 'Spreadsheet processed successfully. All rooms have been created.'
-                  : 'Import aborted (All-or-Nothing). Review the issues below and correct your spreadsheet.'
+                  : 'No rooms were imported. Review the issues below and correct your spreadsheet.'
                 : 'Upload an Excel spreadsheet to create multiple study rooms in bulk.'}
             </p>
           </div>
@@ -395,7 +395,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                   Supported Columns &amp; Validation Rules:
                 </div>
                 <ul style={{ margin: 0, paddingLeft: 18 }}>
-                  <li><strong>All-or-Nothing Rule</strong>: Either all rows in the spreadsheet are valid and created together, or 0 changes are made to the database.</li>
+                  <li><strong>Import Policy</strong>: All rows must be valid. If any duplicates or errors are found, no rooms will be created until they are resolved.</li>
                   <li><strong>Room / Name</strong> (Required, min 3 chars): Must be unique. Existing rooms or intra-file duplicates will abort the upload.</li>
                   <li><strong>Topic</strong> (Optional): Topic is matched or auto-created on the fly.</li>
                   <li><strong>Host</strong> (Optional): Username, email, or user ID. Defaults to your admin account.</li>
@@ -433,7 +433,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                     {result.created_count}
                   </div>
                   <div style={{ fontSize: 12, color: s.colors.lightGray, fontWeight: 600, marginTop: 2 }}>
-                    {result.created_count > 0 ? 'Created' : 'Created (Aborted)'}
+                    {result.created_count > 0 ? 'Created' : 'Imported'}
                   </div>
                 </div>
 
@@ -505,7 +505,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                   `\u2713 All ${result.created_count} rooms have been cleanly saved to the database. Click "Done" to see your updated rooms list.`
                 ) : (
                   <>
-                    <strong>All-or-Nothing Rule Enforced:</strong> 0 rooms were saved to the database. Because {duplicatesList.length > 0 && errorsList.length > 0 ? 'duplicate room names and validation errors were' : duplicatesList.length > 0 ? 'duplicate room names were' : 'validation errors were'} detected, the entire upload was aborted to maintain data consistency. Correct the issues below in your spreadsheet and upload again.
+                    <strong>No rooms were imported.</strong> Your spreadsheet contains issues that need to be resolved. Please correct the highlighted rows below and upload the file again.
                   </>
                 )}
               </div>
