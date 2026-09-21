@@ -104,7 +104,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
       const hasDuplicates = res.duplicates && res.duplicates.length > 0;
       const hasErrors = res.errors && res.errors.length > 0;
 
-      // Industry Standard UX - Scenario A: 100% clean success (0 duplicates, 0 errors)
+      // Clean success (all rows valid, 0 duplicates, 0 errors)
       // Automatically close modal and fire success toast + table refresh
       if (res.created_count > 0 && !hasDuplicates && !hasErrors) {
         handleReset();
@@ -121,8 +121,8 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
         return;
       }
 
-      // Scenario B: Partial success, duplicates skipped, or errors found:
-      // Keep modal open with detailed report summary for admin to inspect
+      // If any duplicates or errors exist, 0 rows were created (All-or-Nothing).
+      // Keep modal open with detailed report summary for admin to inspect and fix.
     } catch (err) {
       setError(err.message || 'Failed to upload and process Excel file.');
     } finally {
@@ -196,7 +196,9 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
             </h2>
             <p style={{ margin: '4px 0 0 0', color: s.colors.gray, fontSize: 13 }}>
               {hasReport
-                ? 'Spreadsheet processing finished. Review the results below.'
+                ? result?.created_count > 0
+                  ? 'Spreadsheet processed successfully. All rooms have been created.'
+                  : 'Import aborted (All-or-Nothing). Review the issues below and correct your spreadsheet.'
                 : 'Upload an Excel spreadsheet to create multiple study rooms in bulk.'}
             </p>
           </div>
@@ -215,7 +217,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
               borderRadius: 6,
             }}
           >
-            ✕
+            &#x2715;
           </button>
         </div>
 
@@ -342,7 +344,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                       {file.name}
                     </div>
                     <div style={{ color: s.colors.gray, fontSize: 12 }}>
-                      {(file.size / 1024).toFixed(1)} KB · Click or drop another file to replace
+                      {(file.size / 1024).toFixed(1)} KB &middot; Click or drop another file to replace
                     </div>
                   </div>
                 ) : (
@@ -390,10 +392,11 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                 }}
               >
                 <div style={{ color: s.colors.light, fontWeight: 600, marginBottom: 4 }}>
-                  Supported Columns &amp; Intelligent Rules:
+                  Supported Columns &amp; Validation Rules:
                 </div>
                 <ul style={{ margin: 0, paddingLeft: 18 }}>
-                  <li><strong>Room / Name</strong> (Required, min 3 chars): Duplicate room names are automatically prevented.</li>
+                  <li><strong>All-or-Nothing Rule</strong>: Either all rows in the spreadsheet are valid and created together, or 0 changes are made to the database.</li>
+                  <li><strong>Room / Name</strong> (Required, min 3 chars): Must be unique. Existing rooms or intra-file duplicates will abort the upload.</li>
                   <li><strong>Topic</strong> (Optional): Topic is matched or auto-created on the fly.</li>
                   <li><strong>Host</strong> (Optional): Username, email, or user ID. Defaults to your admin account.</li>
                   <li><strong>Participants</strong> (Optional): Comma-separated usernames or emails.</li>
@@ -419,18 +422,18 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
               >
                 <div
                   style={{
-                    background: 'rgba(46, 204, 113, 0.12)',
-                    border: '1px solid rgba(46, 204, 113, 0.3)',
+                    background: result.created_count > 0 ? 'rgba(46, 204, 113, 0.12)' : 'rgba(231, 76, 60, 0.08)',
+                    border: `1px solid ${result.created_count > 0 ? 'rgba(46, 204, 113, 0.3)' : 'rgba(231, 76, 60, 0.25)'}`,
                     borderRadius: 10,
                     padding: '12px 16px',
                     textAlign: 'center',
                   }}
                 >
-                  <div style={{ fontSize: 24, fontWeight: 700, color: '#2ecc71' }}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: result.created_count > 0 ? '#2ecc71' : '#e74c3c' }}>
                     {result.created_count}
                   </div>
                   <div style={{ fontSize: 12, color: s.colors.lightGray, fontWeight: 600, marginTop: 2 }}>
-                    Created
+                    {result.created_count > 0 ? 'Created' : 'Created (Aborted)'}
                   </div>
                 </div>
 
@@ -447,7 +450,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                     {result.skipped_duplicates_count || 0}
                   </div>
                   <div style={{ fontSize: 12, color: s.colors.lightGray, fontWeight: 600, marginTop: 2 }}>
-                    Duplicates Skipped
+                    Duplicates Detected
                   </div>
                 </div>
 
@@ -486,11 +489,32 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                 </div>
               </div>
 
+              {/* Informational Guidance */}
+              <div
+                style={{
+                  fontSize: 12,
+                  background: result.created_count > 0 ? 'rgba(46, 204, 113, 0.1)' : 'rgba(231, 76, 60, 0.1)',
+                  border: `1px solid ${result.created_count > 0 ? 'rgba(46, 204, 113, 0.3)' : 'rgba(231, 76, 60, 0.3)'}`,
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  lineHeight: 1.5,
+                  color: result.created_count > 0 ? '#2ecc71' : '#ff7979',
+                }}
+              >
+                {result.created_count > 0 ? (
+                  `\u2713 All ${result.created_count} rooms have been cleanly saved to the database. Click "Done" to see your updated rooms list.`
+                ) : (
+                  <>
+                    <strong>All-or-Nothing Rule Enforced:</strong> 0 rooms were saved to the database. Because {duplicatesList.length > 0 && errorsList.length > 0 ? 'duplicate room names and validation errors were' : duplicatesList.length > 0 ? 'duplicate room names were' : 'validation errors were'} detected, the entire upload was aborted to maintain data consistency. Correct the issues below in your spreadsheet and upload again.
+                  </>
+                )}
+              </div>
+
               {/* Duplicates Section */}
               {duplicatesList.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ color: '#f1c40f', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>⚠️</span> {duplicatesList.length} Duplicate{duplicatesList.length > 1 ? 's' : ''} Skipped (Protected from duplication):
+                    <span>&#x26a0;&#xfe0f;</span> {duplicatesList.length} Duplicate{duplicatesList.length > 1 ? 's' : ''} Found (Import Blocked):
                   </div>
                   <div
                     style={{
@@ -529,7 +553,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
               {errorsList.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ color: '#e74c3c', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>✕</span> {errorsList.length} Row{errorsList.length > 1 ? 's' : ''} Failed Validation:
+                    <span>&#x2715;</span> {errorsList.length} Row{errorsList.length > 1 ? 's' : ''} Failed Validation (Import Blocked):
                   </div>
                   <div
                     style={{
@@ -563,22 +587,6 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                   </div>
                 </div>
               )}
-
-              {/* Informational Guidance */}
-              <div
-                style={{
-                  color: s.colors.gray,
-                  fontSize: 12,
-                  background: s.colors.dark,
-                  padding: '10px 14px',
-                  borderRadius: 8,
-                  border: `1px solid ${s.colors.darkLight}`,
-                }}
-              >
-                {result.created_count > 0
-                  ? `✓ All ${result.created_count} valid rooms have already been saved to the database. You can review the skipped items above or click "Done" to see your updated rooms list.`
-                  : 'No rooms were created because all rows were duplicates or failed validation.'}
-              </div>
             </div>
           )}
         </div>
@@ -596,18 +604,41 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
           }}
         >
           {hasReport ? (
-            <button
-              type="button"
-              onClick={handleClose}
-              style={{
-                ...s.btn('primary'),
-                padding: '8px 24px',
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              Done
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {result.created_count === 0 && (
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  style={{
+                    ...s.btn('default'),
+                    padding: '8px 18px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <polyline points="1 4 1 10 7 10" />
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                  </svg>
+                  Upload Corrected File
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleClose}
+                style={{
+                  ...s.btn(result.created_count > 0 ? 'primary' : 'default'),
+                  padding: '8px 24px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                {result.created_count > 0 ? 'Done' : 'Close'}
+              </button>
+            </div>
           ) : (
             <>
               <button

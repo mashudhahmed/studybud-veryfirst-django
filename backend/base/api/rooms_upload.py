@@ -5,6 +5,7 @@ from openpyxl.utils import get_column_letter
 
 from django.http import HttpResponse
 from django.contrib.auth.models import User
+from django.db import transaction
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
@@ -104,14 +105,11 @@ def admin_rooms_upload_template(request):
 @permission_classes([IsSuperUser])
 def admin_bulk_upload_rooms(request):
     """
-    Parses an uploaded Excel (.xlsx) file and creates rooms in bulk.
-    Features:
-      - Duplicate prevention: skips rooms already in DB (case-insensitive) and intra-file duplicates.
-      - Flexible header aliases: supports 'room', 'room name', 'title', 'category', etc.
-      - Dynamic header row detection: scans first 10 rows for headers.
-      - In-memory pre-fetching: handles 1, 5, 100, or 500+ rooms in milliseconds.
-      - Graceful host fallback: if specified host is missing/invalid, falls back to current admin.
-      - Industry standard response: { total_rows, created_count, skipped_duplicates_count, duplicates, errors }.
+    Parses an uploaded Excel (.xlsx) file and creates rooms in bulk using an
+    All-or-Nothing (Atomic) policy:
+      - Phase 1: In-memory dry-run validation of all rows (duplicates, format, host resolution).
+      - If ANY error or duplicate exists, the entire batch is aborted (0 rooms/topics created).
+      - Phase 2: If 100% valid, all rooms and topics are committed in a single atomic transaction.
     """
     uploaded_file = request.FILES.get('file')
     if not uploaded_file:
@@ -212,7 +210,6 @@ def admin_bulk_upload_rooms(request):
         s_val = str(identifier).strip()
         if not s_val:
             return None
-        # Handle numeric ID (including float 1.0 from Excel)
         try:
             val_float = float(s_val)
             if val_float.is_integer():
@@ -232,13 +229,13 @@ def admin_bulk_upload_rooms(request):
             return user_by_email[lower_val]
         return None
 
-    created_rooms = []
+    data_rows = all_rows[header_row_idx + 1:]
+    parsed_rows = []
     duplicates = []
     errors = []
     total_processed = 0
 
-    data_rows = all_rows[header_row_idx + 1:]
-
+    # Phase 1: Validate all rows (Dry-run)
     for offset, row in enumerate(data_rows):
         row_num = header_row_idx + 2 + offset
         # Skip completely empty rows
@@ -280,17 +277,10 @@ def admin_bulk_upload_rooms(request):
 
         seen_in_batch.add(name_lower)
 
-        # Topic resolution
-        topic_obj = None
+        # Topic string
+        raw_topic = ''
         if topic_idx is not None and topic_idx < len(row) and row[topic_idx] is not None:
             raw_topic = str(row[topic_idx]).strip()
-            if raw_topic:
-                t_lower = raw_topic.lower()
-                if t_lower in topics_cache:
-                    topic_obj = topics_cache[t_lower]
-                else:
-                    topic_obj = Topic.objects.create(name=raw_topic)
-                    topics_cache[t_lower] = topic_obj
 
         # Description
         description = ''
@@ -324,30 +314,70 @@ def admin_bulk_upload_rooms(request):
                     if part_user:
                         participants_set.add(part_user)
 
-        try:
-            room = Room.objects.create(
-                name=raw_name,
-                topic=topic_obj,
-                host=host_user,
-                description=description,
-            )
-            room.participants.set(list(participants_set))
-            existing_rooms_lower[name_lower] = raw_name
-            created_rooms.append({'id': room.id, 'name': room.name})
-        except Exception as create_err:
-            errors.append({
-                'row': row_num,
-                'room_name': raw_name,
-                'error': f'Failed to create room: {str(create_err)}',
-            })
+        parsed_rows.append({
+            'name': raw_name,
+            'raw_topic': raw_topic,
+            'description': description,
+            'host': host_user,
+            'participants': list(participants_set),
+        })
+
+    if total_processed == 0:
+        return Response(
+            {'detail': 'The spreadsheet does not contain any data rows.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # ALL-OR-NOTHING GATE: If ANY duplicates or errors occurred, abort entire upload (0 created)
+    if duplicates or errors:
+        return Response(
+            {
+                'total_rows': total_processed,
+                'created_count': 0,
+                'skipped_duplicates_count': len(duplicates),
+                'duplicates': duplicates,
+                'errors': errors,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    # Phase 2: Atomic Execution (Only runs if 100% of rows passed)
+    created_rooms = []
+    try:
+        with transaction.atomic():
+            for item in parsed_rows:
+                topic_obj = None
+                raw_topic = item['raw_topic']
+                if raw_topic:
+                    t_lower = raw_topic.lower()
+                    if t_lower in topics_cache:
+                        topic_obj = topics_cache[t_lower]
+                    else:
+                        topic_obj = Topic.objects.create(name=raw_topic)
+                        topics_cache[t_lower] = topic_obj
+
+                room = Room.objects.create(
+                    name=item['name'],
+                    topic=topic_obj,
+                    host=item['host'],
+                    description=item['description'],
+                )
+                if item['participants']:
+                    room.participants.set(item['participants'])
+                created_rooms.append({'id': room.id, 'name': room.name})
+    except Exception as exc:
+        return Response(
+            {'detail': f'Failed to create rooms: {str(exc)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
     return Response(
         {
             'total_rows': total_processed,
             'created_count': len(created_rooms),
-            'skipped_duplicates_count': len(duplicates),
-            'duplicates': duplicates,
-            'errors': errors,
+            'skipped_duplicates_count': 0,
+            'duplicates': [],
+            'errors': [],
         },
         status=status.HTTP_200_OK,
     )
