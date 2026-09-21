@@ -10,6 +10,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [copied, setCopied] = useState(false);
   const fileInputRef = useRef(null);
 
   if (!open) return null;
@@ -18,6 +19,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
     setFile(null);
     setError(null);
     setResult(null);
+    setCopied(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -130,9 +132,59 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
     }
   };
 
+  const handleCopyIssues = async () => {
+    if (!result) return;
+    const dups = result.duplicates || [];
+    const errs = result.errors || [];
+    if (dups.length === 0 && errs.length === 0) return;
+
+    const lines = [
+      `StudyBud Bulk Upload Issues (${dups.length} duplicate${dups.length === 1 ? '' : 's'}, ${errs.length} error${errs.length === 1 ? '' : 's'}):`,
+      '',
+    ];
+
+    if (dups.length > 0) {
+      lines.push('DUPLICATE ROOMS:');
+      dups.forEach((d) => {
+        lines.push(`• Row #${d.row}: "${d.room_name}" — ${d.reason}`);
+      });
+      lines.push('');
+    }
+
+    if (errs.length > 0) {
+      lines.push('VALIDATION ERRORS:');
+      errs.forEach((e) => {
+        lines.push(`• Row #${e.row}: "${e.room_name || 'N/A'}" — ${e.error}`);
+      });
+      lines.push('');
+    }
+
+    const text = lines.join('\n').trim();
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.error('Failed to copy issues:', e);
+    }
+  };
+
   const duplicatesList = result?.duplicates || [];
   const errorsList = result?.errors || [];
   const hasReport = !!result;
+  const hasIssues = duplicatesList.length > 0 || errorsList.length > 0;
 
   return createPortal(
     <div
@@ -489,7 +541,7 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                 </div>
               </div>
 
-              {/* Informational Guidance */}
+              {/* Informational Guidance Banner with Copy Button */}
               <div
                 style={{
                   fontSize: 12,
@@ -499,14 +551,60 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
                   borderRadius: 8,
                   lineHeight: 1.5,
                   color: result.created_count > 0 ? '#2ecc71' : '#ff7979',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
                 }}
               >
-                {result.created_count > 0 ? (
-                  `\u2713 All ${result.created_count} rooms have been cleanly saved to the database. Click "Done" to see your updated rooms list.`
-                ) : (
-                  <>
-                    <strong>No rooms were imported.</strong> Your spreadsheet contains issues that need to be resolved. Please correct the highlighted rows below and upload the file again.
-                  </>
+                <div>
+                  {result.created_count > 0 ? (
+                    `\u2713 All ${result.created_count} rooms have been cleanly saved to the database. Click "Done" to see your updated rooms list.`
+                  ) : (
+                    <>
+                      <strong>No rooms were imported.</strong> Your spreadsheet contains issues that need to be resolved. Please correct the highlighted rows below and upload the file again.
+                    </>
+                  )}
+                </div>
+                {result.created_count === 0 && hasIssues && (
+                  <button
+                    type="button"
+                    onClick={handleCopyIssues}
+                    style={{
+                      background: copied ? 'rgba(46, 204, 113, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                      border: `1px solid ${copied ? '#2ecc71' : 'rgba(255, 255, 255, 0.2)'}`,
+                      color: copied ? '#2ecc71' : '#fff',
+                      borderRadius: 6,
+                      padding: '5px 10px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                      transition: 'all 150ms ease',
+                    }}
+                    title="Copy all duplicates and validation errors to clipboard"
+                  >
+                    {copied ? (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2ecc71" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                        Copy Issues
+                      </>
+                    )}
+                  </button>
                 )}
               </div>
 
@@ -605,6 +703,42 @@ const AdminBulkUploadRoomsModal = ({ open, onClose, onSuccess }) => {
         >
           {hasReport ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {result.created_count === 0 && hasIssues && (
+                <button
+                  type="button"
+                  onClick={handleCopyIssues}
+                  style={{
+                    ...s.btn('default'),
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    borderColor: copied ? '#2ecc71' : undefined,
+                    color: copied ? '#2ecc71' : undefined,
+                    transition: 'all 150ms ease',
+                  }}
+                  title="Copy issues to clipboard"
+                >
+                  {copied ? (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2ecc71" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                      Copy Issues
+                    </>
+                  )}
+                </button>
+              )}
               {result.created_count === 0 && (
                 <button
                   type="button"
